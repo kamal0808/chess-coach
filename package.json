@@ -1,0 +1,12 @@
+{
+  "name": "chess-coach",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node test/check.mjs",
+    "dev": "python3 -m http.server 3010 -d site"
+  },
+  "devDependencies": {
+    "stockfish": "19.0.1"
+  }
+}

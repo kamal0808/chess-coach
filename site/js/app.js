@@ -394,7 +394,7 @@ async function review(user, id) {
   $("anTitle").textContent = "Writing your lesson…";
   $("fill").style.width = "80%";
   const history = await cacheAll(`${ANALYSIS_VERSION}:${user.toLowerCase()}:`);
-  STATE = { coach };
+  STATE = { coach, user, tc: g.tc, game: g };
   lesson = await gameLesson(g, history, (fen, nodes) => coach.evaluate(fen, nodes));
   if (!history.some((h) => h.url !== g.url)) lesson.steps[lesson.steps.length - 1].cta = ["Is this a habit? Check my last 3 months →", `/?u=${encodeURIComponent(user)}`];
   show("s1");
@@ -412,7 +412,8 @@ async function askClaude(q) {
   const gi = s.game;
   const prompt = `You're my chess coach. Answer in plain words, at most 150 words. Use square names (e4) and normal move notation.
 
-About me: chess.com player ${STATE.user}, about ${gi ? gi.myR : STATE.stats.ratingLast} rated in ${STATE.tc}.${gi ? ` In this game I was ${gi.me} against ${gi.op} (${gi.opR}), ${gi.res.toLowerCase()}.` : ""}
+About me: chess.com player ${STATE.user}, about ${gi ? gi.myR : STATE.stats.ratingLast} rated in ${STATE.tc}.${gi ? ` In this game I was ${gi.me} against ${gi.op} (${gi.opR}), ${gi.res.replace(/^You /, "I ").toLowerCase()}.` : ""}${STATE.game ? `
+The whole game: ${STATE.game.san.map((m, i) => (i % 2 ? m : `${i / 2 + 1}. ${m}`)).join(" ")}` : ""}
 
 The board right now (FEN): ${fen}
 ${wtm ? "White" : "Black"} to move.

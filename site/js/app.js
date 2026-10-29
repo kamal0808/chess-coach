@@ -426,8 +426,10 @@ My question: ${q}`;
   let copied = false;
   try { await navigator.clipboard.writeText(prompt); copied = true; } catch {}
   const url = "https://claude.ai/new?q=" + encodeURIComponent(prompt);
-  window.open(url, "_blank", "noopener");
-  out.innerHTML = `Opened Claude in a new tab with your question.${copied ? " It's also copied: if the box is empty there, paste it." : ""} <a href="${url}" target="_blank" rel="noopener">Open again ↗</a>`;
+  // a side window, so the board stays in view; same name, so follow-ups reuse it
+  const w = Math.min(560, Math.round(screen.availWidth * 0.4));
+  window.open(url, "cc-claude", `popup,width=${w},height=${screen.availHeight},left=${screen.availWidth - w},top=0`);
+  out.innerHTML = `Opened Claude beside the board with your question.${copied ? " It's also copied: if the box is empty there, paste it." : ""} <a href="${url}" target="_blank" rel="noopener">Open again ↗</a>`;
 }
 
 document.addEventListener("click", (ev) => {

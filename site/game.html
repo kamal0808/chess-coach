@@ -19,13 +19,12 @@
   .sum { display: flex; gap: 10px; flex-wrap: wrap; margin: 0 0 24px; }
   .sum span { background: var(--card); border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; font-size: 14px; }
   .mo { display: grid; grid-template-columns: minmax(0, 260px) 1fr; gap: 18px; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px; margin: 0 0 16px; }
-  .mo .lb { position: relative; aspect-ratio: 1; width: 100%; }
   .mo h3 { margin: 0 0 6px; font: 700 18px var(--body); }
   .mo .sw { font: 600 14px var(--mono); color: var(--muted); }
   .habit { border-left: 3px solid var(--gold); background: var(--card2); border-radius: 0 8px 8px 0; padding: 10px 12px; margin: 12px 0; }
   .habit b { color: var(--gold); }
   .acts { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-  @media (max-width: 620px) { .mo { grid-template-columns: 1fr; } .mo .lb { max-width: 320px; } }
+  @media (max-width: 620px) { .mo { grid-template-columns: 1fr; } .mo .board { max-width: 320px; } }
 </style>
 </head>
 <body>

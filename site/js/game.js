@@ -17,7 +17,7 @@ for (const m of MOMENTS) {
   const no = `${Math.ceil(m.ply / 2)}${m.ply % 2 ? "." : "..."}`;
   const el = document.createElement("div");
   el.className = "mo";
-  el.innerHTML = `<div class="lb"></div><div>
+  el.innerHTML = `<div class="board"></div><div>
     <h3><span class="bdg ${m.cls} inl">${m.sym}</span> ${no} ${mv.san}</h3>
     <div class="sw">${m.swing} · best was <b>${m.best}</b></div>
     <p>${m.text}</p>
@@ -25,5 +25,5 @@ for (const m of MOMENTS) {
     <div class="acts"><button class="btn sm" type="button">Ask Claude about this move</button><a class="btn ghost sm" href="#">See on chess.com ↗</a></div>
   </div>`;
   box.append(el);
-  staticBoard(el.querySelector(".lb"), c.fen(), { hl: [mv.from, mv.to], bad: m.cls === "blun" });
+  staticBoard(el.querySelector(".board"), c.fen(), { hl: [mv.from, mv.to], bad: m.cls === "blun" });
 }

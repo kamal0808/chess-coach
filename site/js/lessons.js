@@ -168,6 +168,63 @@ export async function openingLesson(games, evaluate) {
   };
 }
 
+// Kinds of costly move we can spot from the game record alone. The next ply is what the opponent actually played.
+const HABITS = [
+  { key: "check", what: "giving a check that just loses the checking piece", rule: "A check is only good if the piece giving it is safe.",
+    test: (g, m) => m.san.includes("+") && (g.san[m.ply] || "").includes("x") && g.san[m.ply].replace(/[+#]/g, "").endsWith(m.uci.slice(2, 4)) },
+  { key: "clock", what: "a big mistake with under 10% of your clock left", rule: "Low on time? Play the safe, simple move fast. Don't start calculating.",
+    test: (g, m) => m.clk != null && g.base > 0 && m.clk / g.base < 0.1 },
+  { key: "taken", what: "a move that lets your opponent take something straight away", rule: "Before every move, three questions in this order: checks, captures, threats, for you and for them.",
+    test: (g, m) => (g.san[m.ply] || "").includes("x") },
+];
+const BIG = 20;
+
+// One game as a lesson: replay to each of the player's worst moves, show what happened and what was better,
+// and if the worst one is a kind the player keeps making in `history` (their other analysed games), say so.
+export async function gameLesson(g, history, evaluate) {
+  const info = gameInfo(g), side = g.color;
+  const worst = g.moves.filter((m) => m.drop >= 10).sort((a, b) => b.drop - a.drop).slice(0, 3).sort((a, b) => a.ply - b.ply);
+  const steps = [{
+    start: g.start || START, moves: g.san.slice(0, worst.length ? worst[0].ply - 1 : g.san.length).join(" "), game: info,
+    name: `Your game vs ${info.op}`, stat: info.res,
+    body: !worst.length ? "No real mistakes in this one: the engine has nothing to teach you here. Try your own ideas on the board."
+      : worst.length === 1 ? "One move decided this game. Let's go to it." : `${worst.length} moves decided this game. Let's go through them.`,
+  }];
+  for (const m of worst) {
+    const before = fenAt(g, m.ply - 1), after = new Chess(before); after.move(m.san);
+    const rep = after.isGameOver() ? null : await evaluate(after.fen(), DEEP);
+    const reply = rep ? uciLine(after.fen(), rep.pv, 1)[0] : null;
+    const deep = await evaluate(before, DEEP), better = uciLine(before, deep.pv, 3), b0 = better[0] || "";
+    const [kind, sym] = m.drop >= 30 ? ["Blunder", "??"] : m.drop >= BIG ? ["Mistake", "?"] : ["Inaccuracy", "?!"];
+    steps.push({ start: before, moves: "", game: info, name: `${kind}: move ${Math.ceil(m.ply / 2)}`, stat: `${evalWords(m.before)} for you`,
+      body: "Before you look at your move: what is attacked, and what can you take?" });
+    steps.push({
+      moves: [m.san, reply].filter(Boolean).join(" "), game: info, tone: "bad", link: g.url,
+      name: `${moveNo(m.ply)}${m.san}${sym}${reply ? ` ${moveNo(m.ply + 1)}${reply}` : ""}`, stat: `${evalWords(m.before)} → ${evalWords(m.after)}`,
+      body: reply && reply.includes("x") ? `This lets ${info.op} play ${reply}.` : reply ? `Best answer: ${reply}, and your position gets worse.` : "This throws the game away.",
+    });
+    if (b0) steps.push({
+      start: before, moves: better.join(" "), game: info, alt: true, tone: "good", name: `Better: ${moveNo(m.ply)}${b0}!`,
+      stat: `Engine: ${evalWords(mineCp(deep, before, side))}`, body: `${b0} is the move here. Try your own moves on the board, and ask Claude why if it isn't clear.`,
+    });
+  }
+  const last = steps[steps.length - 1], top = [...worst].sort((a, b) => b.drop - a.drop)[0];
+  const H = history.filter((h) => h.url !== g.url && h.tc === g.tc && h.moves.length >= 5);
+  const habit = top && top.drop >= BIG && HABITS.find((k) => k.test(g, top));
+  if (worst.length) last.rule = HABITS[2].rule;
+  if (habit && H.length) {
+    const hits = H.filter((h) => h.moves.some((m) => m.drop >= BIG && habit.test(h, m))).sort((a, b) => b.end - a.end);
+    if (hits.length >= 3) steps.push({
+      start: fenAt(g, top.ply - 1), moves: "", game: info, tone: "bad", link: hits[0].url, name: "This one is a habit",
+      stat: `${hits.length} of your last ${H.length} ${g.tc} games`,
+      body: `Move ${Math.ceil(top.ply / 2)} was ${habit.what}. You've done that in ${hits.length} of your last ${H.length} ${g.tc} games. The link shows the most recent one.`,
+      rule: habit.rule,
+    });
+    else last.rule = habit.rule;
+  }
+  return { key: "game", title: "Game review", flip: side === "black", steps };
+}
+
 export async function buildLessons(stats, games, evaluate) {
   const out = [];
   for (const make of [() => flaggedLesson(games, evaluate), () => blundersLesson(stats, games, evaluate), () => openingLesson(games, evaluate)]) {

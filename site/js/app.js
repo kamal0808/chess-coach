@@ -1,9 +1,8 @@
 import { Chess } from "../vendor/chess.js";
 import { analyseGame, buildStats, winPct, openingName } from "./core.js";
-import { buildLessons, moveNo, evalWords } from "./lessons.js";
+import { buildLessons, gameLesson, moveNo, evalWords } from "./lessons.js";
 import { Engine, poolSize } from "./engine.js";
 import { staticBoard, LessonBoard, evalBar } from "./board.js";
-import { mockReview } from "./review.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -22,6 +21,7 @@ const db = new Promise((res) => {
   } catch { res(null); }
 });
 async function cacheGet(key) { const d = await db; if (!d) return null; return new Promise((res) => { const q = d.transaction("games").objectStore("games").get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); }
+async function cacheAll(prefix) { const d = await db; if (!d) return []; return new Promise((res) => { const q = d.transaction("games").objectStore("games").getAll(IDBKeyRange.bound(prefix, prefix + "\uffff")); q.onsuccess = () => res(q.result || []); q.onerror = () => res([]); }); }
 async function cachePut(key, val) { const d = await db; if (!d) return; try { d.transaction("games", "readwrite").objectStore("games").put(val, key); } catch {} }
 
 // ---------- fetching ----------
@@ -313,6 +313,7 @@ async function wtShow(i, animate) {
   $("wtBody").innerHTML = sqLinks(s.body);
   $("wtExtra").innerHTML = (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
     (s.link ? `<a class="btn ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">See your game ↗</a>` : "") +
+    (s.cta ? `<a class="btn sm" href="${esc(s.cta[1])}">${esc(s.cta[0])}</a>` : "") +
     (s.rule ? `<div class="rule"><b>Remember:</b> ${sqLinks(s.rule)}</div>` : "");
   $("wtDots").innerHTML = lesson.steps.map((x, j) => `<button type="button" aria-label="Step ${j + 1}" class="${j === wi ? "on" : x.tone || ""}" data-j="${j}"></button>`).join("");
   $("wtPrev").disabled = wi === 0;
@@ -361,6 +362,44 @@ wb.onMove(async (m, fromDrag) => {
   wb.setBusy(false);
   evalHere(my);
 });
+
+// ---------- one game, opened from the extension: /?game=<chess.com id>&u=<username> ----------
+async function findGame(user, id) {
+  const now = new Date();
+  for (const k of [0, 1]) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - k, 1));
+    let gs = [];
+    try { ({ games: gs = [] } = await getJson(`https://api.chess.com/pub/player/${encodeURIComponent(user)}/games/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`)); } catch (e) { if (e.message !== "not_found") throw e; }
+    const g = gs.find((x) => x.url.endsWith("/" + id));
+    if (g) return g;
+  }
+  return null;
+}
+async function review(user, id) {
+  $("user").value = user;
+  show("s2");
+  $("anUser").textContent = user;
+  $("anTitle").textContent = "Finding your game…";
+  $("found").closest(".side").querySelectorAll(".eyebrow")[1].hidden = true;
+  const fail = (msg) => { show("s1"); $("err").textContent = msg; };
+  let raw;
+  try { raw = await findGame(user, id); } catch { return fail("Couldn't reach chess.com. Check your connection and reload."); }
+  if (!raw) return fail("chess.com hasn't published that game yet. It usually takes a few seconds: reload this page.");
+  if (![raw.white.username, raw.black.username].some((n) => n.toLowerCase() === user.toLowerCase())) return fail(`${user} didn't play in that game.`);
+  $("anTitle").textContent = "Checking every move…";
+  $("fill").style.width = "30%";
+  const coach = new Engine(), key = `${ANALYSIS_VERSION}:${user.toLowerCase()}:${raw.url}`;
+  const g = (await cacheGet(key)) || (await analyseGame(raw, user, (fen) => coach.evaluate(fen, 15000)));
+  cachePut(key, g);
+  $("anTitle").textContent = "Writing your lesson…";
+  $("fill").style.width = "80%";
+  const history = await cacheAll(`${ANALYSIS_VERSION}:${user.toLowerCase()}:`);
+  STATE = { coach };
+  lesson = await gameLesson(g, history, (fen, nodes) => coach.evaluate(fen, nodes));
+  if (!history.some((h) => h.url !== g.url)) lesson.steps[lesson.steps.length - 1].cta = ["Is this a habit? Check my last 3 months →", `/?u=${encodeURIComponent(user)}`];
+  show("s1");
+  prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true); $("wtNext").focus();
+}
 
 // ---------- ask Claude (runs on the visitor's own Claude account) ----------
 function pvSan(fen, pv) { const c = new Chess(fen), out = []; for (const u of (pv || "").split(" ").filter(Boolean).slice(0, 6)) { try { out.push(c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] || "q" }).san); } catch { break; } } return out.join(" "); }
@@ -421,5 +460,5 @@ $("enter").addEventListener("submit", (ev) => {
 });
 staticBoard($("heroBoard"), "2k1r1r1/ppp2p1p/2q1p2B/4Q3/2P5/1NP2PPb/PP6/R2R2K1 b - - 0 22", { flip: true, hl: ["g8", "g3"], bad: true, arrow: ["c6", "f3"] });
 const qs = new URLSearchParams(location.search);
-if (qs.get("u")) { $("user").value = qs.get("u"); const r = qs.get("r"); if (["3m", "500", "all"].includes(r)) document.querySelector(`input[name=range][value="${r}"]`).checked = true; run(qs.get("u"), r || "3m"); }
-if (qs.get("game")) { STATE = { coach: new Engine() }; lesson = mockReview(); prep(lesson); wtEl.hidden = false; wtShow(0, true); }
+if (qs.get("u") && !qs.get("game")) { $("user").value = qs.get("u"); const r = qs.get("r"); if (["3m", "500", "all"].includes(r)) document.querySelector(`input[name=range][value="${r}"]`).checked = true; run(qs.get("u"), r || "3m"); }
+if (qs.get("game") && qs.get("u")) review(qs.get("u"), qs.get("game"));

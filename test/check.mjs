@@ -47,9 +47,10 @@ if (ref) {
 const s = buildStats(out);
 console.log(JSON.stringify({ n: s.n, score: s.score?.toFixed(1), winning: s.winning, thrown: s.thrown, onTime: s.thrownOnTime, leak: s.leak, clk20: [s.clk20Wins, s.clk20Flagged], phase: s.phase, openings: s.openings.slice(0, 3), blunders: s.blunders.map((b) => b.g.url) }, null, 1));
 const evalNodes = (fen, nodes) => new Promise((res) => { pending = res; score = null; pv = ""; sf.processCommand("position fen " + fen); sf.processCommand("go nodes " + nodes); });
-const { buildLessons } = await import("../site/js/lessons.js");
+const { buildLessons, gameLesson } = await import("../site/js/lessons.js");
 const { Chess } = await import("../site/vendor/chess.js");
 const lessons = await buildLessons(s, out, evalNodes);
+for (const g of out.slice(0, 5)) lessons.push(await gameLesson(g, out, evalNodes), await gameLesson(g, [], evalNodes));
 for (const L of lessons) {
   const c = new Chess();
   for (const st of L.steps) {

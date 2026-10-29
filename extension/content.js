@@ -1,6 +1,6 @@
 // Shows "Review with Chess Coach" on chess.com once a game is over. Fair play: it never reads the board,
 // and only asks chess.com whether the game is finished after chess.com itself shows its "Game Review" button.
-const SITE = "update_url" in chrome.runtime.getManifest() ? "https://chess.topc.social" : "http://localhost:8791"; // unpacked = local dev
+const SITE = "update_url" in chrome.runtime.getManifest() ? "https://chess.topc.social" : "http://localhost:8795"; // unpacked = local dev
 let shownFor = null, checking = false;
 
 const gameId = () => (location.pathname.match(/^\/game\/live\/(\d+)/) || [])[1];

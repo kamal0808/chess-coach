@@ -99,7 +99,7 @@ button:focus-visible, input:focus-visible, a:focus-visible, label:focus-within {
 /* walkthrough */
 .wt { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.6); display: grid; place-items: center; overflow-y: auto;
   padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
-.wt .panel { background: var(--card); border: 1px solid var(--line); border-radius: 18px; width: min(920px, 100%); padding: 22px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 26px; align-items: start; position: relative; }
+.wt .panel { background: var(--card); border: 1px solid var(--line); border-radius: 18px; width: min(1240px, 100%); padding: 26px; display: grid; grid-template-columns: minmax(0, min(660px, calc(100vh - 190px))) minmax(0, 1fr); gap: 26px; align-items: start; position: relative; }
 @media (max-width: 720px) { .wt { place-items: start center; } .wt .panel { grid-template-columns: 1fr; gap: 16px; padding: 16px; } .wt .wtb { max-width: 380px; width: 100%; margin: 0 auto; } }
 .wt .x { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border-radius: 8px; border: 0; background: var(--card2); color: var(--fg); font-size: 20px; cursor: pointer; z-index: 4; }
 .wt .tx { display: grid; gap: 14px; align-content: start; min-height: 100%; }

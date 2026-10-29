@@ -3,6 +3,7 @@ import { analyseGame, buildStats, winPct, openingName } from "./core.js";
 import { buildLessons, moveNo, evalWords } from "./lessons.js";
 import { Engine, poolSize } from "./engine.js";
 import { staticBoard, LessonBoard, evalBar } from "./board.js";
+import { mockReview } from "./review.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -421,3 +422,4 @@ $("enter").addEventListener("submit", (ev) => {
 staticBoard($("heroBoard"), "2k1r1r1/ppp2p1p/2q1p2B/4Q3/2P5/1NP2PPb/PP6/R2R2K1 b - - 0 22", { flip: true, hl: ["g8", "g3"], bad: true, arrow: ["c6", "f3"] });
 const qs = new URLSearchParams(location.search);
 if (qs.get("u")) { $("user").value = qs.get("u"); const r = qs.get("r"); if (["3m", "500", "all"].includes(r)) document.querySelector(`input[name=range][value="${r}"]`).checked = true; run(qs.get("u"), r || "3m"); }
+if (qs.get("game")) { STATE = { coach: new Engine() }; lesson = mockReview(); prep(lesson); wtEl.hidden = false; wtShow(0, true); }

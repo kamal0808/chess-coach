@@ -14,7 +14,7 @@ const clockTxt = (s) => (s == null ? "" : `${Math.floor(s / 60)}:${String(Math.f
 const dateTxt = (t) => new Date(t * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const RESULT = { win: "You won", timeout: "You lost on time", resigned: "You resigned", checkmated: "You got checkmated", abandoned: "You abandoned" };
 export function gameInfo(g) {
-  return { me: g.color, myR: g.myRating, op: g.op, opR: g.opRating, date: dateTxt(g.end), base: g.base, clk: g.clocks, url: g.url,
+  return { san: g.san, start: g.start, me: g.color, myR: g.myRating, op: g.op, opR: g.opRating, date: dateTxt(g.end), base: g.base, clk: g.clocks, url: g.url,
     res: RESULT[g.result] || (scoreOf(g.result) === 0.5 ? "Draw" : "You lost") };
 }
 function fenAt(g, plies) {
@@ -166,6 +166,69 @@ export async function openingLesson(games, evaluate) {
         body: `${better[0]} is the engine's choice here. Try your own moves on the board to see why ${mistake} is worse.` },
     ],
   };
+}
+
+// Kinds of costly move we can spot from the game record alone. The next ply is what the opponent actually played.
+const HABITS = [
+  { key: "check", what: "a check that lost the checking piece", rule: "A check is only good if the piece giving it is safe.",
+    test: (g, m) => m.san.includes("+") && (g.san[m.ply] || "").includes("x") && g.san[m.ply].replace(/[+#]/g, "").endsWith(m.uci.slice(2, 4)) },
+  { key: "clock", what: "a big mistake with under 10% of your clock left", rule: "Low on time? Play the safe, simple move fast. Don't start calculating.",
+    test: (g, m) => m.clk != null && g.base > 0 && m.clk / g.base < 0.1 },
+  { key: "taken", what: "a mistake your opponent punished by taking something straight away", rule: "Before every move, three questions in this order: checks, captures, threats, for you and for them.",
+    test: (g, m) => (g.san[m.ply] || "").includes("x") },
+];
+const BIG = 20;
+
+const topMistake = (g) => [...g.moves].sort((a, b) => b.drop - a.drop).find((m) => m.drop >= BIG);
+// "This one is a habit" when the game's worst move is a kind the player made in 3+ of their other analysed games, else null
+export function habitStep(g, history) {
+  const top = topMistake(g), habit = top && HABITS.find((k) => k.test(g, top));
+  if (!habit) return null;
+  const H = history.filter((h) => h.url !== g.url && h.tc === g.tc && h.moves.length >= 5);
+  const hits = H.filter((h) => h.moves.some((m) => m.drop >= BIG && habit.test(h, m))).sort((a, b) => b.end - a.end);
+  if (hits.length < 3) return null;
+  return {
+    start: fenAt(g, top.ply - 1), moves: "", game: gameInfo(g), tone: "bad", link: hits[0].url, name: "This one is a habit",
+    stat: `${hits.length} of your last ${H.length} ${g.tc} games`,
+    body: `Move ${Math.ceil(top.ply / 2)} was ${habit.what}. You've done that in ${hits.length} of your last ${H.length} ${g.tc} games. The link shows the most recent one.`,
+    rule: habit.rule,
+  };
+}
+
+// One game as a lesson: replay to each of the player's worst moves, show what happened and what was better,
+// and if the worst one is a kind the player keeps making in `history` (their other analysed games), say so.
+export async function gameLesson(g, history, evaluate) {
+  const info = gameInfo(g), side = g.color;
+  const worst = g.moves.filter((m) => m.drop >= 10).sort((a, b) => b.drop - a.drop).slice(0, 3).sort((a, b) => a.ply - b.ply);
+  const steps = [{
+    start: g.start || START, moves: g.san.slice(0, worst.length ? worst[0].ply - 1 : g.san.length).join(" "), game: info,
+    name: `Your game vs ${info.op}`, stat: info.res,
+    body: !worst.length ? "No real mistakes in this one: the engine has nothing to teach you here. Try your own ideas on the board."
+      : worst.length === 1 ? "One move decided this game. Let's go to it." : `${worst.length} moves decided this game. Let's go through them.`,
+  }];
+  for (const m of worst) {
+    const before = fenAt(g, m.ply - 1), after = new Chess(before); after.move(m.san);
+    const rep = after.isGameOver() ? null : await evaluate(after.fen(), DEEP);
+    const reply = rep ? uciLine(after.fen(), rep.pv, 1)[0] : null;
+    const deep = await evaluate(before, DEEP), better = uciLine(before, deep.pv, 3), b0 = better[0] || "";
+    const [kind, sym] = m.drop >= 30 ? ["Blunder", "??"] : m.drop >= BIG ? ["Mistake", "?"] : ["Inaccuracy", "?!"];
+    steps.push({ start: before, moves: "", game: info, name: `${kind}: move ${Math.ceil(m.ply / 2)}`, stat: `${evalWords(m.before)} for you`,
+      body: "Before you look at your move: what is attacked, and what can you take?" });
+    steps.push({
+      moves: [m.san, reply].filter(Boolean).join(" "), game: info, tone: "bad", link: g.url,
+      name: `${moveNo(m.ply)}${m.san}${sym}${reply ? ` ${moveNo(m.ply + 1)}${reply}` : ""}`, stat: `${evalWords(m.before)} → ${evalWords(m.after)}`,
+      body: reply && reply.includes("x") ? `This lets ${info.op} play ${reply}.` : reply ? `Best answer: ${reply}, and your position gets worse.` : "This throws the game away.",
+    });
+    if (b0) steps.push({
+      start: before, moves: better.join(" "), game: info, alt: true, tone: "good", name: `Better: ${moveNo(m.ply)}${b0}!`,
+      stat: `Engine: ${evalWords(mineCp(deep, before, side))}`, body: `${b0} is the move here. Try your own moves on the board, and ask Claude why if it isn't clear.`,
+    });
+  }
+  const top = topMistake(g);
+  if (worst.length) steps[steps.length - 1].rule = (top && HABITS.find((k) => k.test(g, top)) || HABITS[2]).rule;
+  const hs = habitStep(g, history);
+  if (hs) steps.push(hs);
+  return { key: "game", title: "Game review", flip: side === "black", steps };
 }
 
 export async function buildLessons(stats, games, evaluate) {

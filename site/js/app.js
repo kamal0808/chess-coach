@@ -1,6 +1,6 @@
 import { Chess } from "../vendor/chess.js";
 import { analyseGame, buildStats, winPct, openingName } from "./core.js";
-import { buildLessons, moveNo, evalWords } from "./lessons.js";
+import { buildLessons, gameLesson, habitStep, moveNo, evalWords } from "./lessons.js";
 import { Engine, poolSize } from "./engine.js";
 import { staticBoard, LessonBoard, evalBar } from "./board.js";
 
@@ -21,6 +21,7 @@ const db = new Promise((res) => {
   } catch { res(null); }
 });
 async function cacheGet(key) { const d = await db; if (!d) return null; return new Promise((res) => { const q = d.transaction("games").objectStore("games").get(key); q.onsuccess = () => res(q.result || null); q.onerror = () => res(null); }); }
+async function cacheAll(prefix) { const d = await db; if (!d) return []; return new Promise((res) => { const q = d.transaction("games").objectStore("games").getAll(IDBKeyRange.bound(prefix, prefix + "\uffff")); q.onsuccess = () => res(q.result || []); q.onerror = () => res([]); }); }
 async function cachePut(key, val) { const d = await db; if (!d) return; try { d.transaction("games", "readwrite").objectStore("games").put(val, key); } catch {} }
 
 // ---------- fetching ----------
@@ -303,19 +304,71 @@ function evalHere(my) {
   const g = wb.game(), fen = g.fen(), turnW = g.turn() === "w";
   coachEval(fen, 60000, () => my !== token).then((r) => { if (r && my === token) evalBar($("evb"), turnW ? r.cp : -r.cp, wb.flip()); });
 }
+// ---------- move list: one move back/forward, your own moves branch off like on chess.com ----------
+let nodes = [], cur = null;
+const addNode = (m, parent) => { const n = { fen: m ? m.after : parent, m, parent: m ? parent : null, kids: [], id: nodes.length }; nodes.push(n); if (m) parent.kids.push(n); return n; };
+const follow = (m) => (cur = cur.kids.find((k) => k.m.san === m.san) || addNode(m, cur));
+function grow(m) { follow(m); renderMoves(); }
+// main line = the real game when the step has one, so you can walk the whole game; the step's moves follow it or branch off
+function buildTree(s) {
+  nodes = [];
+  const gi = s.game;
+  if (gi && gi.san) {
+    const c = new Chess(gi.start || undefined);
+    let n = addNode(null, c.fen());
+    for (const san of gi.san) n = addNode(c.move(san), n);
+    cur = nodes.find((x) => x.fen === s.from);
+  }
+  if (!cur || !nodes.includes(cur)) { nodes = []; cur = addNode(null, s.from); }
+  for (const m of s.mv) follow(m);
+  renderMoves();
+}
+function mvTok(n, num) {
+  const p = plyOf(n.parent.fen) + 1;
+  return `<button type="button" class="${n === cur ? "on" : ""}" data-n="${n.id}">${p % 2 || num ? moveNo(p) : ""}${esc(n.m.san)}</button>`;
+}
+function mvLine(n, num) {
+  let h = "";
+  while (n.kids.length) {
+    const [main, ...alts] = n.kids;
+    h += mvTok(main, num);
+    for (const a of alts) h += `<span class="var">(${mvTok(a, true)}${mvLine(a, false)})</span>`;
+    n = main; num = alts.length > 0;
+  }
+  return h;
+}
+function renderMoves() {
+  $("mvList").innerHTML = mvLine(nodes[0], true) || '<span class="muted">Play a move to start a line.</span>';
+  $("mvList").querySelector(".on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  $("mvPrev").disabled = !cur.parent; $("mvNext").disabled = !cur.kids.length;
+}
+function goTo(n) {
+  if (!n) return;
+  const my = ++token;
+  cur = n;
+  wb.set(n.fen, lesson.flip);
+  wb.mark(n.m ? [n.m.from, n.m.to] : [], "last");
+  wb.setBusy(false);
+  renderMoves();
+  evalHere(my);
+}
+
+function navUi() {
+  $("wtStep").textContent = `${lesson.title} · step ${wi + 1} of ${lesson.steps.length}`;
+  $("wtDots").innerHTML = lesson.steps.map((x, j) => `<button type="button" aria-label="Step ${j + 1}" class="${j === wi ? "on" : x.tone || ""}" data-j="${j}"></button>`).join("");
+  $("wtPrev").disabled = wi === 0;
+  $("wtNext").textContent = wi === lesson.steps.length - 1 ? "Done ✓" : "Next →";
+}
 async function wtShow(i, animate) {
   wi = Math.max(0, Math.min(lesson.steps.length - 1, i));
   const s = lesson.steps[wi], my = ++token;
   explored = [];
-  $("wtStep").textContent = `${lesson.title} · step ${wi + 1} of ${lesson.steps.length}`;
   const n = $("wtName"); n.textContent = s.name; n.className = "mvname " + (s.tone || "");
   $("wtBody").innerHTML = sqLinks(s.body);
   $("wtExtra").innerHTML = (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
     (s.link ? `<a class="btn ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">See your game ↗</a>` : "") +
     (s.rule ? `<div class="rule"><b>Remember:</b> ${sqLinks(s.rule)}</div>` : "");
-  $("wtDots").innerHTML = lesson.steps.map((x, j) => `<button type="button" aria-label="Step ${j + 1}" class="${j === wi ? "on" : x.tone || ""}" data-j="${j}"></button>`).join("");
-  $("wtPrev").disabled = wi === 0;
-  $("wtNext").textContent = wi === lesson.steps.length - 1 ? "Done ✓" : "Next →";
+  navUi();
   tryMsg("Your turn: drag or tap any piece to try a move.", false);
   const p0 = plyOf(s.from);
   bars(s, animate && !reduce ? p0 : plyOf(s.to));
@@ -330,6 +383,7 @@ async function wtShow(i, animate) {
   } else wb.set(s.to, lesson.flip);
   wb.mark(last ? [last.from, last.to] : [], tone, s.arrows);
   wb.setBusy(false);
+  buildTree(s);
   evalHere(my);
 }
 wb.onMove(async (m, fromDrag) => {
@@ -338,6 +392,7 @@ wb.onMove(async (m, fromDrag) => {
   const pre = coachEval(before, 60000);
   wb.setBusy(true);
   await wb.play(m, fromDrag ? 0 : 200);
+  grow(m);
   wb.mark([m.from, m.to], "last");
   const s = lesson.steps[wi];
   if (s.game) bars({ ...s, alt: true, freeze: s.alt ? s.freeze : plyOf(s.to) }, 0);
@@ -356,10 +411,69 @@ wb.onMove(async (m, fromDrag) => {
   await new Promise((r) => setTimeout(r, 650));
   if (my !== token || !a.best || a.best === "(none)") { wb.setBusy(false); return; }
   const reply = g.moves({ verbose: true }).find((x) => x.from + x.to === a.best.slice(0, 4) && (!x.promotion || x.promotion === (a.best[4] || "q")));
-  if (reply) { await wb.play(reply, 320); if (my !== token) return; explored.push(reply.san); wb.mark([reply.from, reply.to], "last"); if (reply.to !== m.to) wb.badge(m.to, cls, sym); }
+  if (reply) { await wb.play(reply, 320); if (my !== token) return; explored.push(reply.san); grow(reply); wb.mark([reply.from, reply.to], "last"); if (reply.to !== m.to) wb.badge(m.to, cls, sym); }
   wb.setBusy(false);
   evalHere(my);
 });
+
+// ---------- one game, opened from the extension: /?game=<chess.com id>&u=<username> ----------
+async function findGame(user, id) {
+  const now = new Date(), seen = [];
+  for (const k of [0, 1]) {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - k, 1));
+    let gs = [];
+    try { ({ games: gs = [] } = await getJson(`https://api.chess.com/pub/player/${encodeURIComponent(user)}/games/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`)); } catch (e) { if (e.message !== "not_found") throw e; }
+    seen.push(...gs);
+    const g = gs.find((x) => x.url.endsWith("/" + id));
+    if (g) return { raw: g, month: seen };
+  }
+  return {};
+}
+async function review(user, id) {
+  $("user").value = user;
+  show("s2");
+  $("anUser").textContent = user;
+  $("anTitle").textContent = "Finding your game…";
+  $("found").closest(".side").querySelectorAll(".eyebrow")[1].hidden = true;
+  const fail = (msg) => { show("s1"); $("err").textContent = msg; };
+  let raw, month;
+  try { ({ raw, month } = await findGame(user, id)); } catch { return fail("Couldn't reach chess.com. Check your connection and reload."); }
+  if (!raw) return fail("chess.com hasn't published that game yet. It usually takes a few seconds: reload this page.");
+  if (![raw.white.username, raw.black.username].some((n) => n.toLowerCase() === user.toLowerCase())) return fail(`${user} didn't play in that game.`);
+  $("anTitle").textContent = "Checking every move…";
+  $("fill").style.width = "30%";
+  const coach = new Engine(), key = `${ANALYSIS_VERSION}:${user.toLowerCase()}:${raw.url}`;
+  const g = (await cacheGet(key)) || (await analyseGame(raw, user, (fen) => coach.evaluate(fen, 15000)));
+  cachePut(key, g);
+  $("anTitle").textContent = "Writing your lesson…";
+  $("fill").style.width = "80%";
+  STATE = { coach, user, tc: g.tc, game: g };
+  const L = (lesson = await gameLesson(g, [], (fen, nodes) => coach.evaluate(fen, nodes)));
+  show("s1");
+  prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true); $("wtNext").focus();
+  // while they go through the lesson, check their last games of this kind for the same mistake
+  const hs = habitStep(g, await recentHistory(user, g, month));
+  if (!hs || lesson !== L) return;
+  Object.assign(hs, { from: hs.start, to: hs.start, mv: [], freeze: null });
+  L.steps.push(hs);
+  navUi();
+}
+const HABIT_GAMES = 30, HABIT_ENGINES = 2; // light: it runs while they use the lesson
+async function recentHistory(user, g, month) {
+  const pre = `${ANALYSIS_VERSION}:${user.toLowerCase()}:`, have = await cacheAll(pre), got = new Set(have.map((h) => h.url));
+  const todo = month.filter((x) => x.rules === "chess" && x.pgn && x.time_class === g.tc && x.url !== g.url)
+    .sort((a, b) => b.end_time - a.end_time).slice(0, HABIT_GAMES).filter((x) => !got.has(x.url));
+  const engines = Array.from({ length: Math.min(HABIT_ENGINES, todo.length) }, () => new Engine());
+  let next = 0;
+  await Promise.all(engines.map(async (e) => {
+    while (next < todo.length) {
+      const x = todo[next++];
+      try { const a = await analyseGame(x, user, (fen) => e.evaluate(fen, 15000)); have.push(a); cachePut(pre + x.url, a); } catch {}
+    }
+  }));
+  engines.forEach((e) => e.stop());
+  return have;
+}
 
 // ---------- ask Claude (runs on the visitor's own Claude account) ----------
 function pvSan(fen, pv) { const c = new Chess(fen), out = []; for (const u of (pv || "").split(" ").filter(Boolean).slice(0, 6)) { try { out.push(c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] || "q" }).san); } catch { break; } } return out.join(" "); }
@@ -372,7 +486,8 @@ async function askClaude(q) {
   const gi = s.game;
   const prompt = `You're my chess coach. Answer in plain words, at most 150 words. Use square names (e4) and normal move notation.
 
-About me: chess.com player ${STATE.user}, about ${gi ? gi.myR : STATE.stats.ratingLast} rated in ${STATE.tc}.${gi ? ` In this game I was ${gi.me} against ${gi.op} (${gi.opR}), ${gi.res.toLowerCase()}.` : ""}
+About me: chess.com player ${STATE.user}, about ${gi ? gi.myR : STATE.stats.ratingLast} rated in ${STATE.tc}.${gi ? ` In this game I was ${gi.me} against ${gi.op} (${gi.opR}), ${gi.res.replace(/^You /, "I ").toLowerCase()}.` : ""}${STATE.game ? `
+The whole game: ${STATE.game.san.map((m, i) => (i % 2 ? m : `${i / 2 + 1}. ${m}`)).join(" ")}` : ""}
 
 The board right now (FEN): ${fen}
 ${wtm ? "White" : "Black"} to move.
@@ -385,13 +500,16 @@ My question: ${q}`;
   let copied = false;
   try { await navigator.clipboard.writeText(prompt); copied = true; } catch {}
   const url = "https://claude.ai/new?q=" + encodeURIComponent(prompt);
-  window.open(url, "_blank", "noopener");
-  out.innerHTML = `Opened Claude in a new tab with your question.${copied ? " It's also copied: if the box is empty there, paste it." : ""} <a href="${url}" target="_blank" rel="noopener">Open again ↗</a>`;
+  // a side window, so the board stays in view; same name, so follow-ups reuse it
+  const w = Math.min(560, Math.round(screen.availWidth * 0.4));
+  window.open(url, "cc-claude", `popup,width=${w},height=${screen.availHeight},left=${screen.availWidth - w},top=0`);
+  out.innerHTML = `Opened Claude beside the board with your question.${copied ? " It's also copied: if the box is empty there, paste it." : ""} <a href="${url}" target="_blank" rel="noopener">Open again ↗</a>`;
 }
 
 document.addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-wt]");
   if (b) { lesson = STATE.lessons.find((l) => l.key === b.dataset.wt); if (lesson) { prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true); $("wtNext").focus(); } }
+  const mv = ev.target.closest("#mvList button"); if (mv) goTo(nodes[+mv.dataset.n]);
   const dot = ev.target.closest("#wtDots button"); if (dot) wtShow(+dot.dataset.j, false);
   const ref = ev.target.closest(".sqref"); if (ref) wb.ping(ref.dataset.sq);
   const chip = ev.target.closest("#askChips button"); if (chip) askClaude(chip.textContent);
@@ -402,11 +520,13 @@ $("wtClose").addEventListener("click", () => (wtEl.hidden = true));
 $("wtPrev").addEventListener("click", () => wtShow(wi - 1, false));
 $("wtNext").addEventListener("click", () => (wi === lesson.steps.length - 1 ? (wtEl.hidden = true) : wtShow(wi + 1, true)));
 $("wtReplay").addEventListener("click", () => wtShow(wi, true));
+$("mvPrev").addEventListener("click", () => goTo(cur.parent));
+$("mvNext").addEventListener("click", () => goTo(cur.kids[0]));
 $("tryReset").addEventListener("click", () => wtShow(wi, false));
 document.addEventListener("keydown", (ev) => {
   if (wtEl.hidden || ev.target.closest("input")) return;
-  if (ev.key === "ArrowRight" && wi < lesson.steps.length - 1) wtShow(wi + 1, true);
-  if (ev.key === "ArrowLeft") wtShow(wi - 1, false);
+  if (ev.key === "ArrowRight") goTo(cur.kids[0]);
+  if (ev.key === "ArrowLeft") goTo(cur.parent);
   if (ev.key === "Escape") wtEl.hidden = true;
 });
 
@@ -420,4 +540,5 @@ $("enter").addEventListener("submit", (ev) => {
 });
 staticBoard($("heroBoard"), "2k1r1r1/ppp2p1p/2q1p2B/4Q3/2P5/1NP2PPb/PP6/R2R2K1 b - - 0 22", { flip: true, hl: ["g8", "g3"], bad: true, arrow: ["c6", "f3"] });
 const qs = new URLSearchParams(location.search);
-if (qs.get("u")) { $("user").value = qs.get("u"); const r = qs.get("r"); if (["3m", "500", "all"].includes(r)) document.querySelector(`input[name=range][value="${r}"]`).checked = true; run(qs.get("u"), r || "3m"); }
+if (qs.get("u") && !qs.get("game")) { $("user").value = qs.get("u"); const r = qs.get("r"); if (["3m", "500", "all"].includes(r)) document.querySelector(`input[name=range][value="${r}"]`).checked = true; run(qs.get("u"), r || "3m"); }
+if (qs.get("game") && qs.get("u")) review(qs.get("u"), qs.get("game"));

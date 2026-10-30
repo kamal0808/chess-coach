@@ -13,6 +13,12 @@ python3 -m http.server 3010 -d site
 
 Then open http://localhost:3010. `npm install && node test/check.mjs <dir of chess.com monthly JSON> <username> [games]` runs the analysis and lesson code in node on real games.
 
+## Review one game
+
+`/?game=<chess.com game id>&u=<username>` turns one game into a lesson: the worst moves, what was better, and a "this is a habit" step when the same kind of mistake shows up in the player's last 30 games (checked in the background).
+
+The Chrome extension in `extension/` adds a "Review with Chess Coach" button on chess.com once a game is over. For fair play it never reads the board: it waits for chess.com's own "Game Review" button, then asks chess.com's game endpoint whether that game is finished. Load it unpacked from `chrome://extensions` (Developer mode) and it points at `http://localhost:3010`; installed from the Chrome Web Store it points at chess.topc.social.
+
 ## Contribute
 
 Tasks and the Neki ledger live in [topc-social/chess-coach-tasks](https://github.com/topc-social/chess-coach-tasks). Pick an issue, hand in a pull request here.

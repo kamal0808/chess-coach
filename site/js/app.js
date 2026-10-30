@@ -304,6 +304,55 @@ function evalHere(my) {
   const g = wb.game(), fen = g.fen(), turnW = g.turn() === "w";
   coachEval(fen, 60000, () => my !== token).then((r) => { if (r && my === token) evalBar($("evb"), turnW ? r.cp : -r.cp, wb.flip()); });
 }
+// ---------- move list: one move back/forward, your own moves branch off like on chess.com ----------
+let nodes = [], cur = null;
+const addNode = (m, parent) => { const n = { fen: m ? m.after : parent, m, parent: m ? parent : null, kids: [], id: nodes.length }; nodes.push(n); if (m) parent.kids.push(n); return n; };
+const follow = (m) => (cur = cur.kids.find((k) => k.m.san === m.san) || addNode(m, cur));
+function grow(m) { follow(m); renderMoves(); }
+// main line = the real game when the step has one, so you can walk the whole game; the step's moves follow it or branch off
+function buildTree(s) {
+  nodes = [];
+  const gi = s.game;
+  if (gi && gi.san) {
+    const c = new Chess(gi.start || undefined);
+    let n = addNode(null, c.fen());
+    for (const san of gi.san) n = addNode(c.move(san), n);
+    cur = nodes.find((x) => x.fen === s.from);
+  }
+  if (!cur || !nodes.includes(cur)) { nodes = []; cur = addNode(null, s.from); }
+  for (const m of s.mv) follow(m);
+  renderMoves();
+}
+function mvTok(n, num) {
+  const p = plyOf(n.parent.fen) + 1;
+  return `<button type="button" class="${n === cur ? "on" : ""}" data-n="${n.id}">${p % 2 || num ? moveNo(p) : ""}${esc(n.m.san)}</button>`;
+}
+function mvLine(n, num) {
+  let h = "";
+  while (n.kids.length) {
+    const [main, ...alts] = n.kids;
+    h += mvTok(main, num);
+    for (const a of alts) h += `<span class="var">(${mvTok(a, true)}${mvLine(a, false)})</span>`;
+    n = main; num = alts.length > 0;
+  }
+  return h;
+}
+function renderMoves() {
+  $("mvList").innerHTML = mvLine(nodes[0], true) || '<span class="muted">Play a move to start a line.</span>';
+  $("mvList").querySelector(".on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  $("mvPrev").disabled = !cur.parent; $("mvNext").disabled = !cur.kids.length;
+}
+function goTo(n) {
+  if (!n) return;
+  const my = ++token;
+  cur = n;
+  wb.set(n.fen, lesson.flip);
+  wb.mark(n.m ? [n.m.from, n.m.to] : [], "last");
+  wb.setBusy(false);
+  renderMoves();
+  evalHere(my);
+}
+
 async function wtShow(i, animate) {
   wi = Math.max(0, Math.min(lesson.steps.length - 1, i));
   const s = lesson.steps[wi], my = ++token;
@@ -332,6 +381,7 @@ async function wtShow(i, animate) {
   } else wb.set(s.to, lesson.flip);
   wb.mark(last ? [last.from, last.to] : [], tone, s.arrows);
   wb.setBusy(false);
+  buildTree(s);
   evalHere(my);
 }
 wb.onMove(async (m, fromDrag) => {
@@ -340,6 +390,7 @@ wb.onMove(async (m, fromDrag) => {
   const pre = coachEval(before, 60000);
   wb.setBusy(true);
   await wb.play(m, fromDrag ? 0 : 200);
+  grow(m);
   wb.mark([m.from, m.to], "last");
   const s = lesson.steps[wi];
   if (s.game) bars({ ...s, alt: true, freeze: s.alt ? s.freeze : plyOf(s.to) }, 0);
@@ -358,7 +409,7 @@ wb.onMove(async (m, fromDrag) => {
   await new Promise((r) => setTimeout(r, 650));
   if (my !== token || !a.best || a.best === "(none)") { wb.setBusy(false); return; }
   const reply = g.moves({ verbose: true }).find((x) => x.from + x.to === a.best.slice(0, 4) && (!x.promotion || x.promotion === (a.best[4] || "q")));
-  if (reply) { await wb.play(reply, 320); if (my !== token) return; explored.push(reply.san); wb.mark([reply.from, reply.to], "last"); if (reply.to !== m.to) wb.badge(m.to, cls, sym); }
+  if (reply) { await wb.play(reply, 320); if (my !== token) return; explored.push(reply.san); grow(reply); wb.mark([reply.from, reply.to], "last"); if (reply.to !== m.to) wb.badge(m.to, cls, sym); }
   wb.setBusy(false);
   evalHere(my);
 });
@@ -435,6 +486,7 @@ My question: ${q}`;
 document.addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-wt]");
   if (b) { lesson = STATE.lessons.find((l) => l.key === b.dataset.wt); if (lesson) { prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true); $("wtNext").focus(); } }
+  const mv = ev.target.closest("#mvList button"); if (mv) goTo(nodes[+mv.dataset.n]);
   const dot = ev.target.closest("#wtDots button"); if (dot) wtShow(+dot.dataset.j, false);
   const ref = ev.target.closest(".sqref"); if (ref) wb.ping(ref.dataset.sq);
   const chip = ev.target.closest("#askChips button"); if (chip) askClaude(chip.textContent);
@@ -445,11 +497,13 @@ $("wtClose").addEventListener("click", () => (wtEl.hidden = true));
 $("wtPrev").addEventListener("click", () => wtShow(wi - 1, false));
 $("wtNext").addEventListener("click", () => (wi === lesson.steps.length - 1 ? (wtEl.hidden = true) : wtShow(wi + 1, true)));
 $("wtReplay").addEventListener("click", () => wtShow(wi, true));
+$("mvPrev").addEventListener("click", () => goTo(cur.parent));
+$("mvNext").addEventListener("click", () => goTo(cur.kids[0]));
 $("tryReset").addEventListener("click", () => wtShow(wi, false));
 document.addEventListener("keydown", (ev) => {
   if (wtEl.hidden || ev.target.closest("input")) return;
-  if (ev.key === "ArrowRight" && wi < lesson.steps.length - 1) wtShow(wi + 1, true);
-  if (ev.key === "ArrowLeft") wtShow(wi - 1, false);
+  if (ev.key === "ArrowRight") goTo(cur.kids[0]);
+  if (ev.key === "ArrowLeft") goTo(cur.parent);
   if (ev.key === "Escape") wtEl.hidden = true;
 });
 

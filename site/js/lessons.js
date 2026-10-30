@@ -14,7 +14,7 @@ const clockTxt = (s) => (s == null ? "" : `${Math.floor(s / 60)}:${String(Math.f
 const dateTxt = (t) => new Date(t * 1000).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const RESULT = { win: "You won", timeout: "You lost on time", resigned: "You resigned", checkmated: "You got checkmated", abandoned: "You abandoned" };
 export function gameInfo(g) {
-  return { me: g.color, myR: g.myRating, op: g.op, opR: g.opRating, date: dateTxt(g.end), base: g.base, clk: g.clocks, url: g.url,
+  return { san: g.san, start: g.start, me: g.color, myR: g.myRating, op: g.op, opR: g.opRating, date: dateTxt(g.end), base: g.base, clk: g.clocks, url: g.url,
     res: RESULT[g.result] || (scoreOf(g.result) === 0.5 ? "Draw" : "You lost") };
 }
 function fenAt(g, plies) {

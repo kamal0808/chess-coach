@@ -1,6 +1,6 @@
 import { Chess } from "../vendor/chess.js";
 import { analyseGame, buildStats, winPct, openingName } from "./core.js";
-import { buildLessons, gameLesson, moveNo, evalWords } from "./lessons.js";
+import { buildLessons, gameLesson, habitStep, moveNo, evalWords } from "./lessons.js";
 import { Engine, poolSize } from "./engine.js";
 import { staticBoard, LessonBoard, evalBar } from "./board.js";
 
@@ -353,20 +353,22 @@ function goTo(n) {
   evalHere(my);
 }
 
+function navUi() {
+  $("wtStep").textContent = `${lesson.title} · step ${wi + 1} of ${lesson.steps.length}`;
+  $("wtDots").innerHTML = lesson.steps.map((x, j) => `<button type="button" aria-label="Step ${j + 1}" class="${j === wi ? "on" : x.tone || ""}" data-j="${j}"></button>`).join("");
+  $("wtPrev").disabled = wi === 0;
+  $("wtNext").textContent = wi === lesson.steps.length - 1 ? "Done ✓" : "Next →";
+}
 async function wtShow(i, animate) {
   wi = Math.max(0, Math.min(lesson.steps.length - 1, i));
   const s = lesson.steps[wi], my = ++token;
   explored = [];
-  $("wtStep").textContent = `${lesson.title} · step ${wi + 1} of ${lesson.steps.length}`;
   const n = $("wtName"); n.textContent = s.name; n.className = "mvname " + (s.tone || "");
   $("wtBody").innerHTML = sqLinks(s.body);
   $("wtExtra").innerHTML = (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
     (s.link ? `<a class="btn ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">See your game ↗</a>` : "") +
-    (s.cta ? `<a class="btn sm" href="${esc(s.cta[1])}">${esc(s.cta[0])}</a>` : "") +
     (s.rule ? `<div class="rule"><b>Remember:</b> ${sqLinks(s.rule)}</div>` : "");
-  $("wtDots").innerHTML = lesson.steps.map((x, j) => `<button type="button" aria-label="Step ${j + 1}" class="${j === wi ? "on" : x.tone || ""}" data-j="${j}"></button>`).join("");
-  $("wtPrev").disabled = wi === 0;
-  $("wtNext").textContent = wi === lesson.steps.length - 1 ? "Done ✓" : "Next →";
+  navUi();
   tryMsg("Your turn: drag or tap any piece to try a move.", false);
   const p0 = plyOf(s.from);
   bars(s, animate && !reduce ? p0 : plyOf(s.to));
@@ -416,15 +418,16 @@ wb.onMove(async (m, fromDrag) => {
 
 // ---------- one game, opened from the extension: /?game=<chess.com id>&u=<username> ----------
 async function findGame(user, id) {
-  const now = new Date();
+  const now = new Date(), seen = [];
   for (const k of [0, 1]) {
     const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - k, 1));
     let gs = [];
     try { ({ games: gs = [] } = await getJson(`https://api.chess.com/pub/player/${encodeURIComponent(user)}/games/${d.getUTCFullYear()}/${String(d.getUTCMonth() + 1).padStart(2, "0")}`)); } catch (e) { if (e.message !== "not_found") throw e; }
+    seen.push(...gs);
     const g = gs.find((x) => x.url.endsWith("/" + id));
-    if (g) return g;
+    if (g) return { raw: g, month: seen };
   }
-  return null;
+  return {};
 }
 async function review(user, id) {
   $("user").value = user;
@@ -433,8 +436,8 @@ async function review(user, id) {
   $("anTitle").textContent = "Finding your game…";
   $("found").closest(".side").querySelectorAll(".eyebrow")[1].hidden = true;
   const fail = (msg) => { show("s1"); $("err").textContent = msg; };
-  let raw;
-  try { raw = await findGame(user, id); } catch { return fail("Couldn't reach chess.com. Check your connection and reload."); }
+  let raw, month;
+  try { ({ raw, month } = await findGame(user, id)); } catch { return fail("Couldn't reach chess.com. Check your connection and reload."); }
   if (!raw) return fail("chess.com hasn't published that game yet. It usually takes a few seconds: reload this page.");
   if (![raw.white.username, raw.black.username].some((n) => n.toLowerCase() === user.toLowerCase())) return fail(`${user} didn't play in that game.`);
   $("anTitle").textContent = "Checking every move…";
@@ -444,12 +447,32 @@ async function review(user, id) {
   cachePut(key, g);
   $("anTitle").textContent = "Writing your lesson…";
   $("fill").style.width = "80%";
-  const history = await cacheAll(`${ANALYSIS_VERSION}:${user.toLowerCase()}:`);
   STATE = { coach, user, tc: g.tc, game: g };
-  lesson = await gameLesson(g, history, (fen, nodes) => coach.evaluate(fen, nodes));
-  if (!history.some((h) => h.url !== g.url)) lesson.steps[lesson.steps.length - 1].cta = ["Is this a habit? Check my last 3 months →", `/?u=${encodeURIComponent(user)}`];
+  const L = (lesson = await gameLesson(g, [], (fen, nodes) => coach.evaluate(fen, nodes)));
   show("s1");
   prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true); $("wtNext").focus();
+  // while they go through the lesson, check their last games of this kind for the same mistake
+  const hs = habitStep(g, await recentHistory(user, g, month));
+  if (!hs || lesson !== L) return;
+  Object.assign(hs, { from: hs.start, to: hs.start, mv: [], freeze: null });
+  L.steps.push(hs);
+  navUi();
+}
+const HABIT_GAMES = 30, HABIT_ENGINES = 2; // light: it runs while they use the lesson
+async function recentHistory(user, g, month) {
+  const pre = `${ANALYSIS_VERSION}:${user.toLowerCase()}:`, have = await cacheAll(pre), got = new Set(have.map((h) => h.url));
+  const todo = month.filter((x) => x.rules === "chess" && x.pgn && x.time_class === g.tc && x.url !== g.url)
+    .sort((a, b) => b.end_time - a.end_time).slice(0, HABIT_GAMES).filter((x) => !got.has(x.url));
+  const engines = Array.from({ length: Math.min(HABIT_ENGINES, todo.length) }, () => new Engine());
+  let next = 0;
+  await Promise.all(engines.map(async (e) => {
+    while (next < todo.length) {
+      const x = todo[next++];
+      try { const a = await analyseGame(x, user, (fen) => e.evaluate(fen, 15000)); have.push(a); cachePut(pre + x.url, a); } catch {}
+    }
+  }));
+  engines.forEach((e) => e.stop());
+  return have;
 }
 
 // ---------- ask Claude (runs on the visitor's own Claude account) ----------

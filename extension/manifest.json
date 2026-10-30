@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Chess Coach: free game review",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "After every chess.com game, one click turns it into a lesson: your mistakes, the better moves, and whether it's a habit. Free.",
   "content_scripts": [
     {

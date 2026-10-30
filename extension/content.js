@@ -3,7 +3,7 @@
 const SITE = "update_url" in chrome.runtime.getManifest() ? "https://chess.topc.social" : "http://localhost:3010"; // unpacked = local dev
 let shownFor = null, checking = false;
 
-const gameId = () => (location.pathname.match(/^\/game\/live\/(\d+)/) || [])[1];
+const gameId = () => (location.pathname.match(/^\/game\/(?:live\/)?(\d+)/) || [])[1];
 const hasReviewButton = () => [...document.querySelectorAll("button, a")].some((b) => b.textContent.trim() === "Game Review");
 
 async function check() {

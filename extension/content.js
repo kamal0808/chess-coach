@@ -52,28 +52,34 @@ function verdict() {
   for (let p = el.parentElement, i = 0; p && i < 4; p = p.parentElement, i++) if (p.textContent.trim().length > head.length + 15) return p.innerText.replace(/\s+/g, " ").trim().slice(0, 400);
   return head;
 }
-const numbered = (san) => san.map((m, i) => (i % 2 ? m : `${i / 2 + 1}. ${m}`)).join(" ");
+const API = "https://chess-api.topc.social/explain";
+const plyNow = () => +(new URLSearchParams(location.search).get("move") || 0);
+// the answer shows in a box under chess.com's buttons, so you never leave the review
 async function explain(btn) {
-  const id = reviewId(), ply = +(new URLSearchParams(location.search).get("move") || 0);
-  const label = btn.textContent;
-  btn.textContent = "Getting the game…";
+  const id = reviewId(), ply = plyNow();
+  let box = document.getElementById("cc-answer");
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "cc-answer";
+    box.style.cssText = "margin:10px 0;padding:12px 14px;border-radius:10px;background:#fff;color:#222;font:15px/1.45 system-ui,sans-serif;white-space:pre-wrap";
+    const row = btn.parentElement;
+    (row && row !== document.body ? row : btn).after(box);
+  }
+  box.dataset.ply = ply;
+  box.textContent = "💡 Thinking about this move…";
+  btn.disabled = true;
   try {
-    const { h, san } = await gameMoves(id), mv = san[ply];
-    const prompt = `You're my chess coach. Answer in plain words, at most 150 words. Use square names (e4) and normal move notation.
-
-Game: ${h.White} (${h.WhiteElo}) vs ${h.Black} (${h.BlackElo}), ${h.Result}, ${h.TimeControl}s.
-The moves: ${numbered(san)}
-
-I'm looking at move ${Math.floor(ply / 2) + 1}${ply % 2 ? "…" : "."}${mv} (${ply % 2 ? "Black" : "White"}).
-chess.com's Game Review says: "${verdict()}"
-
-Explain why this move is good or bad, what was better and why, and the line that punishes it if there is one. Set up the position from the moves before you answer. If you're not sure about a line, say so instead of guessing.`;
-    try { await navigator.clipboard.writeText(prompt); } catch {}
-    window.open("https://claude.ai/new?q=" + encodeURIComponent(prompt), "_blank", "noopener");
-  } catch { alert("Chess Coach couldn't get this game from chess.com yet. Try again in a few seconds."); }
-  btn.textContent = label;
+    const { h, san } = await gameMoves(id);
+    const r = await fetch(API, { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ moves: san, ply, verdict: verdict(), white: h.White, black: h.Black, result: h.Result }) });
+    const d = await r.json();
+    if (box.dataset.ply === String(ply)) box.textContent = d.text ? "💡 " + d.text : d.error || "Couldn't explain this one, try again.";
+  } catch { box.textContent = "Couldn't reach Chess Coach, try again in a few seconds."; }
+  btn.disabled = false;
 }
 function addExplain() {
+  const box = document.getElementById("cc-answer");
+  if (box && (!reviewId() || box.dataset.ply !== String(plyNow()))) box.remove();
   if (!reviewId()) { document.getElementById("cc-explain")?.remove(); return; }
   if (document.getElementById("cc-explain")) return;
   const next = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Next");

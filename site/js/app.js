@@ -1,5 +1,5 @@
 import { Chess } from "../vendor/chess.js";
-import { analyseGame, buildStats, winPct, openingName } from "./core.js";
+import { analyseGame, buildStats, winPct, openingName, scoreOf } from "./core.js";
 import { buildLessons, gameLesson, habitStep, moveNo, evalWords, CLS } from "./lessons.js";
 import { Engine, poolSize } from "./engine.js";
 import { staticBoard, LessonBoard, evalBar } from "./board.js";
@@ -507,6 +507,7 @@ async function review(user, id) {
   const L = (lesson = await gameLesson(g, [], (fen, nodes) => coach.evaluate(fen, nodes)));
   show("s1");
   prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true); $("wtNext").focus();
+  coachLines(id, g, L);
   // while they go through the lesson, check their last games of this kind for the same mistake
   const hs = habitStep(g, await recentHistory(user, g, month));
   if (!hs || lesson !== L) return;
@@ -529,6 +530,19 @@ async function recentHistory(user, g, month) {
   }));
   engines.forEach((e) => e.stop());
   return have;
+}
+
+// ---------- the coach bubble: Claude explains every move from our Stockfish facts, one cached call per game ----------
+async function coachLines(id, g, L) {
+  const me = g.color === "white", sc = scoreOf(g.result); // my score: 1 won, 0.5 drew, 0 lost
+  const result = sc === 0.5 ? "1/2-1/2" : (sc === 1) === me ? "1-0" : "0-1";
+  try {
+    const r = await fetch("https://chess-api.topc.social/game", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, moves: g.san, facts: L.facts, white: me ? STATE.user : g.op, black: me ? g.op : STATE.user, result }) });
+    if (!r.ok) throw new Error("game " + r.status);
+    for (const m of (await r.json()).moves) { const j = L.plyStep[m.ply + 1]; if (j != null) L.steps[j].body = m.text; }
+    if (lesson === L) $("wtBody").innerHTML = sqLinks(L.steps[wi].body);
+  } catch (e) { console.warn("coach lines unavailable, keeping engine text", e); }
 }
 
 // ---------- ask Claude (runs on the visitor's own Claude account) ----------

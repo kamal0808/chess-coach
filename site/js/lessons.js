@@ -209,7 +209,7 @@ const evTxt = (cp) => (Math.abs(cp) >= MATE - 100 ? `${cp > 0 ? "" : "-"}M${Math
 export async function gameLesson(g, history, evaluate) {
   const info = gameInfo(g), side = g.color, myTurn = side === "white" ? "w" : "b";
   const steps = [{ start: g.start || START, moves: "", game: info, name: `Your game vs ${info.op}`, stat: info.res }];
-  const labels = [], plyStep = [0], count = {}, white = (cp) => (side === "white" ? cp : -cp);
+  const labels = [], plyStep = [0], count = {}, facts = [], white = (cp) => (side === "white" ? cp : -cp);
   const c = new Chess(g.start || undefined);
   for (let i = 0; i < g.san.length; i++) {
     const before = c.fen(), m = c.move(g.san[i]), uci = m.from + m.to + (m.promotion || "");
@@ -222,6 +222,10 @@ export async function gameLesson(g, history, evaluate) {
     const bad = !isBest && drop >= 5, bestSan = isBest ? "" : uciLine(before, g.bests[i], 1)[0] || "";
     const reply = bad && !c.isGameOver() ? uciLine(c.fen(), g.bests[i + 1], 1)[0] : null;
     plyStep[i + 1] = steps.length;
+    // what Claude gets to explain this move from (chess-api.topc.social/game)
+    facts.push({ ply: i, label: { best: "best", exc: "excellent", good: "good", inacc: "inaccuracy", mist: "mistake", blun: "blunder" }[cls],
+      winBefore: Math.round(winPct(cb)), winAfter: Math.round(winPct(ca)), best: bestSan, bestLine: bestSan,
+      reply: !c.isGameOver() && g.bests[i + 1] ? uciLine(c.fen(), g.bests[i + 1], 1)[0] || "" : "" });
     steps.push({
       start: before, moves: m.san, game: info, tone: bad ? "bad" : isBest ? "good" : "", badge: [cls, sym], ev: evTxt(white(g.evals[i + 1])),
       best: isBest || !g.bests[i] ? null : g.bests[i], bestSan,
@@ -248,7 +252,7 @@ export async function gameLesson(g, history, evaluate) {
   const turn = tm && { m: tm, before: tb, b0: uciLine(tb, g.bests[tm.ply - 1], 1)[0] || "", reply: uciLine(fenAt(g, tm.ply), g.bests[tm.ply] || "", 1)[0] || null };
   steps.push(verdictStep(g, info, turn, Math.min(worst.length, 3)));
   const graph = g.evals.map((cp) => winPct(white(cp)));
-  return { key: "game", title: "Game review", flip: side === "black", steps, labels, plyStep, graph };
+  return { key: "game", title: "Game review", flip: side === "black", steps, labels, plyStep, graph, facts };
 }
 
 // How the game was won: the opponent's move that handed over the most, and the player's answer.

@@ -1,0 +1,9 @@
+name = "chess-coach-explain"
+main = "worker.mjs"
+compatibility_date = "2026-10-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = false
+
+[[routes]]
+pattern = "chess-api.topc.social"
+custom_domain = true

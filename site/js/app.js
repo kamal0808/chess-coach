@@ -394,6 +394,7 @@ function goTo(n) {
   wb.mark(n.m ? [n.m.from, n.m.to] : [], "last");
   wb.setBusy(false);
   renderMoves();
+  material();
   evalHere(my);
   if (!n.m || n.id <= mainLen) return;
   tryMsg(`<b>${esc(n.m.san)}</b> · Stockfish is thinking…`, true);
@@ -406,6 +407,52 @@ function showBest() {
   wb.set(s.from, lesson.flip);
   wb.mark([], "", [[s.best.slice(0, 2), s.best.slice(2, 4), "green"]]);
   tryMsg(`<span class="bdg best inl">★</span> Best was <b>${esc(s.bestSan)}</b>. Next shows what happened in the game.`, true);
+}
+
+// ---------- what the coach's words point at: moves played with an arrow, squares with every piece aimed at them ----------
+// a move named in the text plays from the first position where it's legal: the board now, the card's end, the card's start
+async function showSan(tok) {
+  const san = tok.replace(/^\d+(?:\.\.\.|\.|…)\s*/, ""), s = lesson.steps[wi];
+  for (const fen of [wb.game().fen(), s.to, s.from]) {
+    let m; try { m = new Chess(fen).move(san); } catch { continue; }
+    const my = ++token;
+    wb.set(fen, lesson.flip); wb.mark([], "");
+    await wb.play(m, 350);
+    if (my !== token) return true;
+    wb.mark([m.from, m.to], "last", [[m.from, m.to, "green"]]);
+    tryMsg(`<b>${esc(m.san)}</b> on the board.`, true);
+    material(); evalHere(my);
+    return true;
+  }
+  return false;
+}
+// direct attackers in orange, and the pieces lined up behind them (a battery, an x-ray) too
+function showAttackers(sq) {
+  const c = new Chess(wb.game().fen()), occ = c.get(sq), by = occ ? (occ.color === "w" ? "b" : "w") : c.turn(), arrows = [];
+  for (let round = 0; round < 3; round++) {
+    const from = c.attackers(sq, by);
+    if (!from.length) break;
+    for (const f of from) { arrows.push([f, sq, round ? "red" : "orange"]); c.remove(f); }
+  }
+  if (!arrows.length) { wb.ping(sq); return; }
+  wb.mark([sq], "", arrows);
+  tryMsg(`${arrows.length} ${by === "w" ? "white" : "black"} piece${arrows.length > 1 ? "s" : ""} aimed at <b>${sq}</b>${arrows.some((a) => a[2] === "red") ? ", red ones lined up behind (a battery)" : ""}.`, true);
+}
+// captured pieces and +N next to each player, like chess.com
+const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9 }, FULL = { p: 8, n: 2, b: 2, r: 2, q: 1 }, ICON = { p: "♟", n: "♞", b: "♝", r: "♜", q: "♛" };
+function material() {
+  const gi = lesson?.steps[wi]?.game;
+  if (!gi) return;
+  const have = { w: {}, b: {} };
+  for (const row of wb.game().board()) for (const p of row) if (p) have[p.color][p.type] = (have[p.color][p.type] || 0) + 1;
+  const pts = (col) => Object.entries(have[col]).reduce((a, [t, n]) => a + (VAL[t] || 0) * n, 0), diff = pts("w") - pts("b");
+  const took = (col) => Object.keys(FULL).map((t) => ICON[t].repeat(Math.max(0, FULL[t] - (have[col === "w" ? "b" : "w"][t] || 0)))).join("");
+  const meW = gi.me === "white";
+  for (const [el, col] of [[$("pBot"), meW ? "w" : "b"], [$("pTop"), meW ? "b" : "w"]]) {
+    el.querySelector(".mat")?.remove();
+    const up = col === "w" ? diff : -diff, who = el.querySelector(".who");
+    if (who) who.insertAdjacentHTML("beforeend", `<span class="mat">${took(col)}${up > 0 ? ` +${up}` : ""}</span>`);
+  }
 }
 
 function navUi() {
@@ -444,6 +491,7 @@ async function wtShow(i, animate) {
   if (s.badge && last) wb.badge(last.to, s.badge[0], s.badge[1]);
   wb.setBusy(false);
   buildTree(s);
+  material();
   evalHere(my);
 }
 wb.onMove(async (m, fromDrag) => {
@@ -453,6 +501,7 @@ wb.onMove(async (m, fromDrag) => {
   await wb.play(m, fromDrag ? 0 : 200);
   grow(m);
   wb.mark([m.from, m.to], "last");
+  material();
   const s = lesson.steps[wi];
   if (s.game) bars({ ...s, alt: true, freeze: s.alt ? s.freeze : plyOf(s.to) }, 0);
   const g = wb.game();
@@ -601,7 +650,12 @@ document.addEventListener("click", (ev) => {
   if (mv) nav(nodes[+mv.dataset.n]);
   const dot = ev.target.closest("#wtDots button"); if (dot) wtShow(+dot.dataset.j, false);
   const ref = ev.target.closest(".sqref");
-  if (ref) { const s = lesson.steps[wi]; s.best && ref.textContent === s.bestSan ? showBest() : wb.ping(ref.dataset.sq); }
+  if (ref) {
+    const s = lesson.steps[wi], t = ref.textContent.trim();
+    if (s.best && t === s.bestSan) showBest();
+    else if (/^[a-h][1-8]$/.test(t)) showAttackers(t);
+    else showSan(t).then((ok) => ok || wb.ping(ref.dataset.sq));
+  }
   const chip = ev.target.closest("#askChips button"); if (chip) askClaude(chip.textContent);
   if (ev.target === wtEl) wtEl.hidden = true;
 });

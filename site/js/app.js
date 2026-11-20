@@ -1,13 +1,13 @@
 import { Chess } from "../vendor/chess.js";
 import { analyseGame, buildStats, winPct, openingName } from "./core.js";
-import { buildLessons, gameLesson, habitStep, moveNo, evalWords } from "./lessons.js";
+import { buildLessons, gameLesson, habitStep, moveNo, evalWords, CLS } from "./lessons.js";
 import { Engine, poolSize } from "./engine.js";
 import { staticBoard, LessonBoard, evalBar } from "./board.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const fmtClock = (t) => { if (t == null) return "–"; t = Math.max(0, t); return t < 20 ? `0:${t.toFixed(1).padStart(4, "0")}` : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`; };
-const ANALYSIS_VERSION = 1;
+const ANALYSIS_VERSION = 2; // 2: per-position evals for the move-by-move review
 
 // ---------- screens ----------
 function show(id) { for (const s of ["s1", "s2", "s3"]) $(s).hidden = s !== id; window.scrollTo(0, 0); }
@@ -298,25 +298,25 @@ function bars(s, ply) {
   bot.innerHTML = one("You", gi.myR, meWhite, true);
 }
 const tryMsg = (html, explore) => { $("tryMsg").innerHTML = html; $("tryReset").hidden = !explore; };
-const CLS = [[0, "best", "★", "the best move"], [2, "exc", "✓", "excellent"], [5, "good", "✓", "good"], [10, "inacc", "?!", "an inaccuracy"], [20, "mist", "?", "a mistake"], [Infinity, "blun", "??", "a blunder"]];
 const coachEval = (fen, nodes, stale) => STATE.coach.evaluate(fen, nodes, stale);
 function evalHere(my) {
   const g = wb.game(), fen = g.fen(), turnW = g.turn() === "w";
   coachEval(fen, 60000, () => my !== token).then((r) => { if (r && my === token) evalBar($("evb"), turnW ? r.cp : -r.cp, wb.flip()); });
 }
 // ---------- move list: one move back/forward, your own moves branch off like on chess.com ----------
-let nodes = [], cur = null;
+let nodes = [], cur = null, mainLen = 0;
 const addNode = (m, parent) => { const n = { fen: m ? m.after : parent, m, parent: m ? parent : null, kids: [], id: nodes.length }; nodes.push(n); if (m) parent.kids.push(n); return n; };
 const follow = (m) => (cur = cur.kids.find((k) => k.m.san === m.san) || addNode(m, cur));
 function grow(m) { follow(m); renderMoves(); }
 // main line = the real game when the step has one, so you can walk the whole game; the step's moves follow it or branch off
 function buildTree(s) {
-  nodes = [];
+  nodes = []; mainLen = 0;
   const gi = s.game;
   if (gi && gi.san) {
     const c = new Chess(gi.start || undefined);
     let n = addNode(null, c.fen());
     for (const san of gi.san) n = addNode(c.move(san), n);
+    mainLen = gi.san.length;
     cur = nodes.find((x) => x.fen === s.from);
   }
   if (!cur || !nodes.includes(cur)) { nodes = []; cur = addNode(null, s.from); }
@@ -325,7 +325,8 @@ function buildTree(s) {
 }
 function mvTok(n, num) {
   const p = plyOf(n.parent.fen) + 1;
-  return `<button type="button" class="${n === cur ? "on" : ""}" data-n="${n.id}">${p % 2 || num ? moveNo(p) : ""}${esc(n.m.san)}</button>`;
+  const lb = n.id <= mainLen && lesson.labels?.[n.id], flag = lb && ["inacc", "mist", "blun"].includes(lb[0]) ? ` <span class="bdg ${lb[0]} inl mvb">${lb[1]}</span>` : "";
+  return `<button type="button" class="${n === cur ? "on" : ""}" data-n="${n.id}">${p % 2 || num ? moveNo(p) : ""}${esc(n.m.san)}${flag}</button>`;
 }
 function mvLine(n, num) {
   let h = "";
@@ -355,7 +356,7 @@ function goTo(n) {
 
 function navUi() {
   $("wtStep").textContent = `${lesson.title} · step ${wi + 1} of ${lesson.steps.length}`;
-  $("wtDots").innerHTML = lesson.steps.map((x, j) => `<button type="button" aria-label="Step ${j + 1}" class="${j === wi ? "on" : x.tone || ""}" data-j="${j}"></button>`).join("");
+  $("wtDots").innerHTML = lesson.steps.length > 24 ? "" : lesson.steps.map((x, j) => `<button type="button" aria-label="Step ${j + 1}" class="${j === wi ? "on" : x.tone || ""}" data-j="${j}"></button>`).join("");
   $("wtPrev").disabled = wi === 0;
   $("wtNext").textContent = wi === lesson.steps.length - 1 ? "Done ✓" : "Next →";
 }
@@ -382,6 +383,7 @@ async function wtShow(i, animate) {
     if (my !== token) return;
   } else wb.set(s.to, lesson.flip);
   wb.mark(last ? [last.from, last.to] : [], tone, s.arrows);
+  if (s.badge && last) wb.badge(last.to, s.badge[0], s.badge[1]);
   wb.setBusy(false);
   buildTree(s);
   evalHere(my);
@@ -509,7 +511,8 @@ My question: ${q}`;
 document.addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-wt]");
   if (b) { lesson = STATE.lessons.find((l) => l.key === b.dataset.wt); if (lesson) { prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true); $("wtNext").focus(); } }
-  const mv = ev.target.closest("#mvList button"); if (mv) goTo(nodes[+mv.dataset.n]);
+  const mv = ev.target.closest("#mvList button");
+  if (mv) { const id = +mv.dataset.n, j = id <= mainLen ? lesson.plyStep?.[id] : null; j != null ? wtShow(j, false) : goTo(nodes[id]); }
   const dot = ev.target.closest("#wtDots button"); if (dot) wtShow(+dot.dataset.j, false);
   const ref = ev.target.closest(".sqref"); if (ref) wb.ping(ref.dataset.sq);
   const chip = ev.target.closest("#askChips button"); if (chip) askClaude(chip.textContent);

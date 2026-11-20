@@ -76,6 +76,7 @@ button:focus-visible, input:focus-visible, a:focus-visible, label:focus-within {
 .lb .h.badge { z-index: 4; background: transparent; }
 .bdg { position: absolute; top: -18%; right: -18%; width: 52%; height: 52%; border-radius: 50%; display: grid; place-items: center; font: 800 clamp(9px, 1.6vw, 13px) var(--body); color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); border: 1.5px solid #fff; }
 .bdg.inl { position: static; display: inline-grid; width: 22px; height: 22px; font-size: 11px; vertical-align: -5px; border: 0; }
+.bdg.mvb { width: 16px; height: 16px; font-size: 9px; vertical-align: -3px; }
 .bdg.best { background: #81b64c; } .bdg.exc { background: #96bc4b; } .bdg.good { background: #77915f; }
 .bdg.inacc { background: #f7c045; } .bdg.mist { background: #e58f2a; } .bdg.blun { background: #ca3431; }
 .mvnav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }

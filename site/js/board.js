@@ -31,19 +31,6 @@ export function staticBoard(el, fen, { flip = false, hl = [], bad = false, arrow
   el.innerHTML = squares(flip) + `<div class="hls">${hls}</div><div class="pcs">${pcs}</div>` + (arrow ? arrowsSvg([[...arrow, "orange"]], flip) : "");
 }
 
-let actx;
-function sfx(capture) {
-  try {
-    actx = actx || new AudioContext();
-    const t = actx.currentTime, o = actx.createOscillator(), v = actx.createGain();
-    o.type = "triangle";
-    o.frequency.setValueAtTime(capture ? 260 : 520, t);
-    o.frequency.exponentialRampToValueAtTime(capture ? 90 : 170, t + .07);
-    v.gain.setValueAtTime(.22, t); v.gain.exponentialRampToValueAtTime(.001, t + .11);
-    o.connect(v).connect(actx.destination); o.start(t); o.stop(t + .12);
-  } catch {}
-}
-
 export function LessonBoard(el) {
   el.innerHTML = '<div class="sqs"></div><div class="hls"></div><div class="pcs"></div>';
   const hls = el.querySelector(".hls"), pcs = el.querySelector(".pcs");
@@ -77,7 +64,6 @@ export function LessonBoard(el) {
       const rp = map[rf]; place(rp, rt); delete map[rf]; map[rt] = rp;
     }
     if (m.promotion) setTimeout(() => (p.className = "pc " + m.color + m.promotion), ms);
-    setTimeout(() => sfx(!!m.captured), ms * .85);
     await new Promise((res) => setTimeout(res, ms + 60));
   }
   const ping = (sq) => { hls.querySelector(".ping")?.remove(); addH("ping", sq); };

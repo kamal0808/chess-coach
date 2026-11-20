@@ -323,10 +323,10 @@ function buildTree(s) {
   for (const m of s.mv) follow(m);
   renderMoves();
 }
-function mvTok(n, num) {
+function mvTok(n, num, bare) {
   const p = plyOf(n.parent.fen) + 1;
   const lb = n.id <= mainLen && lesson.labels?.[n.id], flag = lb && ["inacc", "mist", "blun"].includes(lb[0]) ? ` <span class="bdg ${lb[0]} inl mvb">${lb[1]}</span>` : "";
-  return `<button type="button" class="${n === cur ? "on" : ""}" data-n="${n.id}">${p % 2 || num ? moveNo(p) : ""}${esc(n.m.san)}${flag}</button>`;
+  return `<button type="button" class="${n === cur ? "on" : ""}" data-n="${n.id}">${!bare && (p % 2 || num) ? moveNo(p) : ""}${esc(n.m.san)}${flag}</button>`;
 }
 function mvLine(n, num) {
   let h = "";
@@ -338,10 +338,53 @@ function mvLine(n, num) {
   }
   return h;
 }
+// the game as numbered rows like chess.com, side lines on their own line under the move they branch from
 function renderMoves() {
-  $("mvList").innerHTML = mvLine(nodes[0], true) || '<span class="muted">Play a move to start a line.</span>';
+  let h = "", n = nodes[0], open = false;
+  const close = () => { if (open) { h += "</div>"; open = false; } };
+  while (n.kids.length) {
+    const [main, ...alts] = n.kids, p = plyOf(n.fen) + 1, w = p % 2 === 1;
+    if (w || !open) { close(); h += `<div class="mrow"><span class="no">${Math.ceil(p / 2)}.</span>${w ? "" : '<span class="mc"></span>'}`; open = true; }
+    h += `<span class="mc">${mvTok(main, false, true)}</span>`;
+    if (!w) close();
+    for (const a of alts) { close(); h += `<div class="mvar">${mvTok(a, true)}${mvLine(a, false)}</div>`; }
+    n = main;
+  }
+  close();
+  $("mvList").innerHTML = h || '<span class="muted">Play a move to start a line.</span>';
   $("mvList").querySelector(".on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  $("mvPrev").disabled = !cur.parent; $("mvNext").disabled = !cur.kids.length;
+  $("mvPrev").disabled = $("mvFirst").disabled = !cur.parent; $("mvNext").disabled = $("mvLast").disabled = !cur.kids.length;
+  graphMark();
+}
+// a game move shows its card; a move in a side line gets judged on the spot
+function nav(n) {
+  if (!n) return;
+  const j = n.id <= mainLen ? lesson.plyStep?.[n.id] : null;
+  if (j != null) wtShow(j, false); else goTo(n);
+}
+function graphMark() {
+  const el = $("wtGraph"), G = lesson?.graph;
+  el.hidden = !G;
+  if (!G) return;
+  const x = (i) => (100 * i) / Math.max(1, G.length - 1), ply = cur && cur.id <= mainLen ? cur.id : null;
+  el.innerHTML = `<rect width="100" height="30" class="gb"/><path class="gw" d="M0,30 ${G.map((v, i) => `L${x(i).toFixed(2)},${(30 - v * 0.3).toFixed(2)}`).join(" ")} L100,30 Z"/><line x1="0" x2="100" y1="15" y2="15" class="gm"/>` +
+    (ply != null ? `<line x1="${x(ply)}" x2="${x(ply)}" y1="0" y2="30" class="gc"/>` : "") +
+    lesson.labels.map((l, i) => (l && ["inacc", "mist", "blun"].includes(l[0]) ? `<circle cx="${x(i)}" cy="${30 - G[i] * 0.3}" r="1.1" class="gd ${l[0]}"/>` : "")).join("");
+}
+$("wtGraph").addEventListener("click", (e) => {
+  const G = lesson?.graph; if (!G) return;
+  const r = e.currentTarget.getBoundingClientRect(), ply = Math.round(((e.clientX - r.left) / r.width) * (G.length - 1));
+  nav(nodes[ply]);
+});
+// label a move from its position before, the way the game's own moves are labelled
+async function judge(m, before, after, my) {
+  const [b, a] = await Promise.all([coachEval(before, 60000), coachEval(after, 60000)]);
+  if (my !== token || !b || !a) return null;
+  const drop = winPct(b.cp) - winPct(-a.cp), best = b.best === m.from + m.to + (m.promotion || "");
+  const [, cls, sym, word] = best ? CLS[0] : CLS.find((c) => drop < c[0]);
+  let bestSan = ""; try { bestSan = new Chess(before).move({ from: b.best.slice(0, 2), to: b.best.slice(2, 4), promotion: b.best[4] || "q" }).san; } catch {}
+  const msg = `<span class="bdg ${cls} inl">${sym}</span> <b>${esc(m.san)}</b> is ${word}.${best || !bestSan ? "" : ` Best was <b>${esc(bestSan)}</b>.`}`;
+  return { cls, sym, a, msg };
 }
 function goTo(n) {
   if (!n) return;
@@ -352,6 +395,17 @@ function goTo(n) {
   wb.setBusy(false);
   renderMoves();
   evalHere(my);
+  if (!n.m || n.id <= mainLen) return;
+  tryMsg(`<b>${esc(n.m.san)}</b> · Stockfish is thinking…`, true);
+  judge(n.m, n.parent.fen, n.fen, my).then((j) => { if (j && my === token) { tryMsg(j.msg, true); wb.badge(n.m.to, j.cls, j.sym); } });
+}
+function showBest() {
+  const s = lesson.steps[wi];
+  if (!s.best) return;
+  ++token;
+  wb.set(s.from, lesson.flip);
+  wb.mark([], "", [[s.best.slice(0, 2), s.best.slice(2, 4), "green"]]);
+  tryMsg(`<span class="bdg best inl">★</span> Best was <b>${esc(s.bestSan)}</b>. Next shows what happened in the game.`, true);
 }
 
 function navUi() {
@@ -365,6 +419,9 @@ async function wtShow(i, animate) {
   const s = lesson.steps[wi], my = ++token;
   explored = [];
   const n = $("wtName"); n.textContent = s.name; n.className = "mvname " + (s.tone || "");
+  $("wtIcon").innerHTML = s.badge ? `<span class="bdg ${s.badge[0]} inl">${s.badge[1]}</span>` : "";
+  $("wtEval").textContent = s.ev || ""; $("wtEval").hidden = !s.ev;
+  $("wtBest").hidden = !s.best;
   $("wtBody").innerHTML = sqLinks(s.body);
   $("wtExtra").innerHTML = (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
     (s.link ? `<a class="btn ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">See your game ↗</a>` : "") +
@@ -391,7 +448,6 @@ async function wtShow(i, animate) {
 wb.onMove(async (m, fromDrag) => {
   explored.push(m.san);
   const my = ++token, before = wb.game().fen(), turnW = wb.game().turn() === "w";
-  const pre = coachEval(before, 60000);
   wb.setBusy(true);
   await wb.play(m, fromDrag ? 0 : 200);
   grow(m);
@@ -402,14 +458,12 @@ wb.onMove(async (m, fromDrag) => {
   if (g.isCheckmate()) { tryMsg(`<b>${esc(m.san)}</b> is checkmate.`, true); evalBar($("evb"), turnW ? 10000 : -10000, wb.flip()); return; }
   if (g.isGameOver()) { tryMsg(`<b>${esc(m.san)}</b>: it's a draw.`, true); evalBar($("evb"), 0, wb.flip()); return; }
   tryMsg(`<b>${esc(m.san)}</b> · Stockfish is thinking…`, true);
-  const [b, a] = await Promise.all([pre, coachEval(g.fen(), 60000)]);
-  if (my !== token || !b || !a) return;
-  const drop = winPct(b.cp) - winPct(-a.cp), best = b.best === m.from + m.to + (m.promotion || "");
-  const [, cls, sym, word] = best ? CLS[0] : CLS.find((c) => drop < c[0]);
+  const j = await judge(m, before, g.fen(), my);
+  if (!j) return;
+  const { cls, sym, a } = j;
   wb.badge(m.to, cls, sym);
   evalBar($("evb"), turnW ? -a.cp : a.cp, wb.flip());
-  let bestSan = ""; try { bestSan = new Chess(before).move({ from: b.best.slice(0, 2), to: b.best.slice(2, 4), promotion: b.best[4] || "q" }).san; } catch {}
-  tryMsg(`<span class="bdg ${cls} inl">${sym}</span> <b>${esc(m.san)}</b> is ${word}.${best || !bestSan ? "" : ` Best was <b>${esc(bestSan)}</b>.`}`, true);
+  tryMsg(j.msg, true);
   await new Promise((r) => setTimeout(r, 650));
   if (my !== token || !a.best || a.best === "(none)") { wb.setBusy(false); return; }
   const reply = g.moves({ verbose: true }).find((x) => x.from + x.to === a.best.slice(0, 4) && (!x.promotion || x.promotion === (a.best[4] || "q")));
@@ -502,19 +556,18 @@ My question: ${q}`;
   let copied = false;
   try { await navigator.clipboard.writeText(prompt); copied = true; } catch {}
   const url = "https://claude.ai/new?q=" + encodeURIComponent(prompt);
-  // a side window, so the board stays in view; same name, so follow-ups reuse it
-  const w = Math.min(560, Math.round(screen.availWidth * 0.4));
-  window.open(url, "cc-claude", `popup,width=${w},height=${screen.availHeight},left=${screen.availWidth - w},top=0`);
-  out.innerHTML = `Opened Claude beside the board with your question.${copied ? " It's also copied: if the box is empty there, paste it." : ""} <a href="${url}" target="_blank" rel="noopener">Open again ↗</a>`;
+  window.open(url, "_blank", "noopener");
+  out.innerHTML = `Opened Claude in a new tab with your question.${copied ? " It's also copied: if the box is empty there, paste it." : ""} <a href="${url}" target="_blank" rel="noopener">Open again ↗</a>`;
 }
 
 document.addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-wt]");
   if (b) { lesson = STATE.lessons.find((l) => l.key === b.dataset.wt); if (lesson) { prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true); $("wtNext").focus(); } }
   const mv = ev.target.closest("#mvList button");
-  if (mv) { const id = +mv.dataset.n, j = id <= mainLen ? lesson.plyStep?.[id] : null; j != null ? wtShow(j, false) : goTo(nodes[id]); }
+  if (mv) nav(nodes[+mv.dataset.n]);
   const dot = ev.target.closest("#wtDots button"); if (dot) wtShow(+dot.dataset.j, false);
-  const ref = ev.target.closest(".sqref"); if (ref) wb.ping(ref.dataset.sq);
+  const ref = ev.target.closest(".sqref");
+  if (ref) { const s = lesson.steps[wi]; s.best && ref.textContent === s.bestSan ? showBest() : wb.ping(ref.dataset.sq); }
   const chip = ev.target.closest("#askChips button"); if (chip) askClaude(chip.textContent);
   if (ev.target === wtEl) wtEl.hidden = true;
 });
@@ -523,13 +576,16 @@ $("wtClose").addEventListener("click", () => (wtEl.hidden = true));
 $("wtPrev").addEventListener("click", () => wtShow(wi - 1, false));
 $("wtNext").addEventListener("click", () => (wi === lesson.steps.length - 1 ? (wtEl.hidden = true) : wtShow(wi + 1, true)));
 $("wtReplay").addEventListener("click", () => wtShow(wi, true));
-$("mvPrev").addEventListener("click", () => goTo(cur.parent));
-$("mvNext").addEventListener("click", () => goTo(cur.kids[0]));
+$("mvPrev").addEventListener("click", () => nav(cur.parent));
+$("mvNext").addEventListener("click", () => nav(cur.kids[0]));
+$("mvFirst").addEventListener("click", () => nav(nodes[0]));
+$("mvLast").addEventListener("click", () => { let n = cur; while (n.kids.length) n = n.kids[0]; nav(n); });
+$("wtBest").addEventListener("click", showBest);
 $("tryReset").addEventListener("click", () => wtShow(wi, false));
 document.addEventListener("keydown", (ev) => {
   if (wtEl.hidden || ev.target.closest("input")) return;
-  if (ev.key === "ArrowRight") goTo(cur.kids[0]);
-  if (ev.key === "ArrowLeft") goTo(cur.parent);
+  if (ev.key === "ArrowRight") nav(cur.kids[0]);
+  if (ev.key === "ArrowLeft") nav(cur.parent);
   if (ev.key === "Escape") wtEl.hidden = true;
 });
 

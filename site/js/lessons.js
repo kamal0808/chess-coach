@@ -201,13 +201,15 @@ export function habitStep(g, history) {
 // Labels by how much a move cuts the mover's winning chance (0–100), like chess.com and lichess. No "brilliant".
 export const CLS = [[0, "best", "★", "the best move"], [2, "exc", "✓", "excellent"], [5, "good", "✓", "good"], [10, "inacc", "?!", "an inaccuracy"], [20, "mist", "?", "a mistake"], [Infinity, "blun", "??", "a blunder"]];
 const winTxt = (cp) => `${Math.round(winPct(cp))}%`;
+// engine eval from White's side, like the box on chess.com's coach bubble
+const evTxt = (cp) => (Math.abs(cp) >= MATE - 100 ? `${cp > 0 ? "" : "-"}M${Math.max(1, MATE - Math.abs(cp))}` : `${cp > 0 ? "+" : ""}${(cp / 100).toFixed(2)}`);
 
 // One game, move by move: every move of both sides gets a label and the reason (win chance before → after, the best move,
 // and for anything worse than good the punishing reply), then "where you won it" and the verdict.
 export async function gameLesson(g, history, evaluate) {
   const info = gameInfo(g), side = g.color, myTurn = side === "white" ? "w" : "b";
   const steps = [{ start: g.start || START, moves: "", game: info, name: `Your game vs ${info.op}`, stat: info.res }];
-  const labels = [], plyStep = [], count = {};
+  const labels = [], plyStep = [0], count = {}, white = (cp) => (side === "white" ? cp : -cp);
   const c = new Chess(g.start || undefined);
   for (let i = 0; i < g.san.length; i++) {
     const before = c.fen(), m = c.move(g.san[i]), uci = m.from + m.to + (m.promotion || "");
@@ -221,7 +223,8 @@ export async function gameLesson(g, history, evaluate) {
     const reply = bad && !c.isGameOver() ? uciLine(c.fen(), g.bests[i + 1], 1)[0] : null;
     plyStep[i + 1] = steps.length;
     steps.push({
-      start: before, moves: m.san, game: info, tone: bad ? "bad" : isBest ? "good" : "", badge: [cls, sym],
+      start: before, moves: m.san, game: info, tone: bad ? "bad" : isBest ? "good" : "", badge: [cls, sym], ev: evTxt(white(g.evals[i + 1])),
+      best: isBest || !g.bests[i] ? null : g.bests[i], bestSan,
       name: `${moveNo(i + 1)}${m.san} is ${word}`,
       stat: `${me ? "Your" : `${info.op}'s`} win chance: ${winTxt(cb)} → ${winTxt(ca)}`,
       body: (isBest ? "That's the engine's top move." : bestSan ? `Best was ${bestSan}.` : "") +
@@ -244,7 +247,8 @@ export async function gameLesson(g, history, evaluate) {
   const tm = worst[0], tb = tm && fenAt(g, tm.ply - 1);
   const turn = tm && { m: tm, before: tb, b0: uciLine(tb, g.bests[tm.ply - 1], 1)[0] || "", reply: uciLine(fenAt(g, tm.ply), g.bests[tm.ply] || "", 1)[0] || null };
   steps.push(verdictStep(g, info, turn, Math.min(worst.length, 3)));
-  return { key: "game", title: "Game review", flip: side === "black", steps, labels, plyStep };
+  const graph = g.evals.map((cp) => winPct(white(cp)));
+  return { key: "game", title: "Game review", flip: side === "black", steps, labels, plyStep, graph };
 }
 
 // How the game was won: the opponent's move that handed over the most, and the player's answer.

@@ -69,27 +69,34 @@
         <div class="pbar" id="pTop"></div>
         <div class="bwrap"><div class="evb" id="evb" aria-hidden="true"><i></i><span></span></div><div class="board lb" id="wtBoard"></div></div>
         <div class="pbar" id="pBot"></div>
-        <div class="try"><span id="tryMsg"></span><button class="btn ghost sm" type="button" id="tryReset" hidden>↺ Back to lesson</button></div>
-        <div class="mvlist" id="mvList" aria-label="Moves"></div>
-        <div class="mvnav"><button class="btn ghost" type="button" id="mvPrev" aria-label="Previous move">‹</button><button class="btn ghost" type="button" id="mvNext" aria-label="Next move">›</button></div>
+        <div class="try"><span id="tryMsg"></span><button class="btn ghost sm" type="button" id="tryReset" hidden>↺ Back to the game</button></div>
       </div>
       <div class="tx">
-        <span class="eyebrow" id="wtStep"></span>
-        <div class="mvname" id="wtName"></div>
-        <p class="body" id="wtBody"></p>
-        <div id="wtExtra"></div>
-        <div class="ask" id="ask">
-          <span class="eyebrow">Ask Claude about this board</span>
+        <div class="rvh"><span class="eyebrow" id="wtStep"></span></div>
+        <div class="coach">
+          <div class="cav" aria-hidden="true">♞</div>
+          <div class="bubble">
+            <div class="bh"><span id="wtIcon"></span><span class="mvname" id="wtName"></span><span class="evbox" id="wtEval"></span></div>
+            <p class="body" id="wtBody"></p>
+            <div id="wtExtra"></div>
+          </div>
+        </div>
+        <div class="nav"><button class="btn ghost" type="button" id="wtBest">★ Best</button><button class="btn" type="button" id="wtNext">Next →</button></div>
+        <div class="mvlist" id="mvList" aria-label="Moves"></div>
+        <svg class="graph" id="wtGraph" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div class="ctl"><button class="btn ghost" type="button" id="mvFirst" aria-label="First move">⏮</button><button class="btn ghost" type="button" id="mvPrev" aria-label="Previous move">‹</button><button class="btn ghost" type="button" id="mvNext" aria-label="Next move">›</button><button class="btn ghost" type="button" id="mvLast" aria-label="Last move">⏭</button></div>
+        <details class="ask" id="ask">
+          <summary>Ask Claude about this board</summary>
           <div class="chips" id="askChips"><button type="button">Why is this the best move?</button><button type="button">What's my plan from here?</button><button type="button">What is my opponent threatening?</button></div>
           <form class="askf" id="askForm"><input id="askIn" autocomplete="off" placeholder="e.g. why do I let it take my knight?" aria-label="Your question"><button class="btn sm" type="submit">Ask</button></form>
           <p class="muted small" id="askOut" aria-live="polite"></p>
-        </div>
+        </details>
         <div class="dots" id="wtDots"></div>
-        <div class="nav"><button class="btn ghost" type="button" id="wtPrev">← Back</button><button class="btn ghost" type="button" id="wtReplay" aria-label="Replay this step">↻</button><button class="btn" type="button" id="wtNext">Next →</button></div>
+        <button class="btn ghost sm" type="button" id="wtPrev" hidden>← Back</button><button type="button" id="wtReplay" hidden></button>
       </div>
     </div>
   </div>
 </div>
-<script type="module" src="js/app.js?v=5"></script>
+<script type="module" src="js/app.js?v=6"></script>
 </body>
 </html>

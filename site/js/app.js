@@ -1,13 +1,13 @@
 import { Chess } from "../vendor/chess.js";
-import { analyseGame, buildStats, winPct, openingName } from "./core.js";
-import { buildLessons, gameLesson, habitStep, moveNo, evalWords } from "./lessons.js";
+import { analyseGame, buildStats, winPct, openingName, scoreOf } from "./core.js";
+import { buildLessons, gameLesson, habitStep, moveNo, evalWords, CLS } from "./lessons.js";
 import { Engine, poolSize } from "./engine.js";
 import { staticBoard, LessonBoard, evalBar } from "./board.js";
 
 const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const fmtClock = (t) => { if (t == null) return "–"; t = Math.max(0, t); return t < 20 ? `0:${t.toFixed(1).padStart(4, "0")}` : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`; };
-const ANALYSIS_VERSION = 1;
+const ANALYSIS_VERSION = 2; // 2: per-position evals for the move-by-move review
 
 // ---------- screens ----------
 function show(id) { for (const s of ["s1", "s2", "s3"]) $(s).hidden = s !== id; window.scrollTo(0, 0); }
@@ -296,36 +296,38 @@ function bars(s, ply) {
   };
   top.innerHTML = one(gi.op, gi.opR, !meWhite, false);
   bot.innerHTML = one("You", gi.myR, meWhite, true);
+  material(); // redrawn with the bars, or the line vanishes mid-animation and the board jumps
 }
 const tryMsg = (html, explore) => { $("tryMsg").innerHTML = html; $("tryReset").hidden = !explore; };
-const CLS = [[0, "best", "★", "the best move"], [2, "exc", "✓", "excellent"], [5, "good", "✓", "good"], [10, "inacc", "?!", "an inaccuracy"], [20, "mist", "?", "a mistake"], [Infinity, "blun", "??", "a blunder"]];
 const coachEval = (fen, nodes, stale) => STATE.coach.evaluate(fen, nodes, stale);
 function evalHere(my) {
   const g = wb.game(), fen = g.fen(), turnW = g.turn() === "w";
   coachEval(fen, 60000, () => my !== token).then((r) => { if (r && my === token) evalBar($("evb"), turnW ? r.cp : -r.cp, wb.flip()); });
 }
 // ---------- move list: one move back/forward, your own moves branch off like on chess.com ----------
-let nodes = [], cur = null;
+let nodes = [], cur = null, mainLen = 0;
 const addNode = (m, parent) => { const n = { fen: m ? m.after : parent, m, parent: m ? parent : null, kids: [], id: nodes.length }; nodes.push(n); if (m) parent.kids.push(n); return n; };
 const follow = (m) => (cur = cur.kids.find((k) => k.m.san === m.san) || addNode(m, cur));
 function grow(m) { follow(m); renderMoves(); }
 // main line = the real game when the step has one, so you can walk the whole game; the step's moves follow it or branch off
 function buildTree(s) {
-  nodes = [];
+  nodes = []; mainLen = 0;
   const gi = s.game;
   if (gi && gi.san) {
     const c = new Chess(gi.start || undefined);
     let n = addNode(null, c.fen());
     for (const san of gi.san) n = addNode(c.move(san), n);
+    mainLen = gi.san.length;
     cur = nodes.find((x) => x.fen === s.from);
   }
   if (!cur || !nodes.includes(cur)) { nodes = []; cur = addNode(null, s.from); }
   for (const m of s.mv) follow(m);
   renderMoves();
 }
-function mvTok(n, num) {
+function mvTok(n, num, bare) {
   const p = plyOf(n.parent.fen) + 1;
-  return `<button type="button" class="${n === cur ? "on" : ""}" data-n="${n.id}">${p % 2 || num ? moveNo(p) : ""}${esc(n.m.san)}</button>`;
+  const lb = n.id <= mainLen && lesson.labels?.[n.id], flag = lb && ["inacc", "mist", "blun"].includes(lb[0]) ? ` <span class="bdg ${lb[0]} inl mvb">${lb[1]}</span>` : "";
+  return `<button type="button" class="${n === cur ? "on" : ""}" data-n="${n.id}">${!bare && (p % 2 || num) ? moveNo(p) : ""}${esc(n.m.san)}${flag}</button>`;
 }
 function mvLine(n, num) {
   let h = "";
@@ -337,10 +339,55 @@ function mvLine(n, num) {
   }
   return h;
 }
+// the game as numbered rows like chess.com, side lines on their own line under the move they branch from
 function renderMoves() {
-  $("mvList").innerHTML = mvLine(nodes[0], true) || '<span class="muted">Play a move to start a line.</span>';
-  $("mvList").querySelector(".on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
-  $("mvPrev").disabled = !cur.parent; $("mvNext").disabled = !cur.kids.length;
+  let h = "", n = nodes[0], open = false;
+  const close = () => { if (open) { h += "</div>"; open = false; } };
+  while (n.kids.length) {
+    const [main, ...alts] = n.kids, p = plyOf(n.fen) + 1, w = p % 2 === 1;
+    if (w || !open) { close(); h += `<div class="mrow"><span class="no">${Math.ceil(p / 2)}.</span>${w ? "" : '<span class="mc"></span>'}`; open = true; }
+    h += `<span class="mc">${mvTok(main, false, true)}</span>`;
+    if (!w) close();
+    for (const a of alts) { close(); h += `<div class="mvar">${mvTok(a, true)}${mvLine(a, false)}</div>`; }
+    n = main;
+  }
+  close();
+  $("mvList").innerHTML = h || '<span class="muted">Play a move to start a line.</span>';
+  // scroll only the list itself: scrollIntoView also moves the page, which made the board jump
+  const list = $("mvList"), on = list.querySelector(".on");
+  if (on) { const r = on.getBoundingClientRect(), l = list.getBoundingClientRect(); if (r.top < l.top || r.bottom > l.bottom) list.scrollTop += r.top - l.top - l.height / 2; }
+  $("mvPrev").disabled = $("mvFirst").disabled = !cur.parent; $("mvNext").disabled = $("mvLast").disabled = !cur.kids.length;
+  graphMark();
+}
+// a game move shows its card; a move in a side line gets judged on the spot
+function nav(n) {
+  if (!n) return;
+  const j = n.id <= mainLen ? lesson.plyStep?.[n.id] : null;
+  if (j != null) wtShow(j, false); else goTo(n);
+}
+function graphMark() {
+  const el = $("wtGraph"), G = lesson?.graph;
+  el.hidden = !G;
+  if (!G) return;
+  const x = (i) => (100 * i) / Math.max(1, G.length - 1), ply = cur && cur.id <= mainLen ? cur.id : null;
+  el.innerHTML = `<rect width="100" height="30" class="gb"/><path class="gw" d="M0,30 ${G.map((v, i) => `L${x(i).toFixed(2)},${(30 - v * 0.3).toFixed(2)}`).join(" ")} L100,30 Z"/><line x1="0" x2="100" y1="15" y2="15" class="gm"/>` +
+    (ply != null ? `<line x1="${x(ply)}" x2="${x(ply)}" y1="0" y2="30" class="gc"/>` : "") +
+    lesson.labels.map((l, i) => (l && ["inacc", "mist", "blun"].includes(l[0]) ? `<circle cx="${x(i)}" cy="${30 - G[i] * 0.3}" r="1.1" class="gd ${l[0]}"/>` : "")).join("");
+}
+$("wtGraph").addEventListener("click", (e) => {
+  const G = lesson?.graph; if (!G) return;
+  const r = e.currentTarget.getBoundingClientRect(), ply = Math.round(((e.clientX - r.left) / r.width) * (G.length - 1));
+  nav(nodes[ply]);
+});
+// label a move from its position before, the way the game's own moves are labelled
+async function judge(m, before, after, my) {
+  const [b, a] = await Promise.all([coachEval(before, 60000), coachEval(after, 60000)]);
+  if (my !== token || !b || !a) return null;
+  const drop = winPct(b.cp) - winPct(-a.cp), best = b.best === m.from + m.to + (m.promotion || "");
+  const [, cls, sym, word] = best ? CLS[0] : CLS.find((c) => drop < c[0]);
+  let bestSan = ""; try { bestSan = new Chess(before).move({ from: b.best.slice(0, 2), to: b.best.slice(2, 4), promotion: b.best[4] || "q" }).san; } catch {}
+  const msg = `<span class="bdg ${cls} inl">${sym}</span> <b>${esc(m.san)}</b> is ${word}.${best || !bestSan ? "" : ` Best was <b>${esc(bestSan)}</b>.`}`;
+  return { cls, sym, a, msg };
 }
 function goTo(n) {
   if (!n) return;
@@ -350,20 +397,109 @@ function goTo(n) {
   wb.mark(n.m ? [n.m.from, n.m.to] : [], "last");
   wb.setBusy(false);
   renderMoves();
+  material();
   evalHere(my);
+  if (!n.m || n.id <= mainLen) return;
+  tryMsg(`<b>${esc(n.m.san)}</b> · Stockfish is thinking…`, true);
+  judge(n.m, n.parent.fen, n.fen, my).then((j) => { if (j && my === token) { tryMsg(j.msg, true); wb.badge(n.m.to, j.cls, j.sym); } });
+}
+function showBest() {
+  const s = lesson.steps[wi];
+  if (!s.best) return;
+  ++token;
+  wb.set(s.from, lesson.flip);
+  wb.mark([], "", [[s.best.slice(0, 2), s.best.slice(2, 4), "green"]]);
+  tryMsg(`<span class="bdg best inl">★</span> Best was <b>${esc(s.bestSan)}</b>. Next shows what happened in the game.`, true);
+}
+
+// ---------- what the coach's words point at: moves played with an arrow, squares with every piece aimed at them ----------
+// a move named in the text plays from the first position where it's legal: the board now, the card's end, the card's start
+async function showSan(tok) {
+  const san = tok.replace(/^\d+(?:\.\.\.|\.|…)\s*/, ""), s = lesson.steps[wi];
+  for (const fen of [wb.game().fen(), s.to, s.from]) {
+    let m; try { m = new Chess(fen).move(san); } catch { continue; }
+    const my = ++token;
+    wb.set(fen, lesson.flip); wb.mark([], "");
+    await wb.play(m, 350);
+    if (my !== token) return true;
+    wb.mark([m.from, m.to], "last", [[m.from, m.to, "green"]]);
+    tryMsg(`<b>${esc(m.san)}</b> on the board.`, true);
+    material(); evalHere(my);
+    return true;
+  }
+  return false;
+}
+// a move inside a written line ("17...Bf5 18.Bxg5 Qg6"): replay the line from where it starts in the game up to the tapped move.
+// Returns false when the tapped move isn't in a numbered line, so the caller tries it on its own.
+async function playLine(ref) {
+  const toks = [ref];
+  for (let n = ref.previousSibling; n; n = n.previousSibling) {
+    if (n.nodeType === 1 && n.classList.contains("sqref")) toks.unshift(n);
+    else if (!(n.nodeType === 3 && /^\s*$/.test(n.textContent))) break;
+  }
+  // the move number sits in the first token ("18.Bxg5") or in the text just before it ("17... Bf5")
+  const before = toks[0].previousSibling, gi = lesson.steps[wi].game;
+  const num = toks[0].textContent.match(/^(\d+)\s*(\.\.\.|…|\.)/) || (before && before.nodeType === 3 ? before.textContent.match(/(\d+)\s*(\.\.\.|…|\.)\s*$/) : null);
+  if (!num || !gi || !gi.san) return false;
+  const start = (num[1] - 1) * 2 + (num[2] === "." ? 0 : 1);
+  if (start > gi.san.length) return false;
+  const c = new Chess(gi.start || undefined);
+  for (const m of gi.san.slice(0, start)) c.move(m);
+  const fen = c.fen(), mv = [];
+  for (const t of toks) { try { mv.push(c.move(t.textContent.trim().replace(/^\d+\s*(?:\.\.\.|\.|…)\s*/, ""))); } catch { return false; } }
+  const my = ++token;
+  wb.set(fen, lesson.flip); wb.mark([], "");
+  for (const m of mv) { await wb.play(m, 320); if (my !== token) return true; }
+  const last = mv[mv.length - 1];
+  wb.mark([last.from, last.to], "last", [[last.from, last.to, "green"]]);
+  tryMsg(`The coach's line: <b>${esc(mv.map((m) => m.san).join(" "))}</b>`, true);
+  material(); evalHere(my);
+  return true;
+}
+// direct attackers in orange, and the pieces lined up behind them (a battery, an x-ray) too
+function showAttackers(sq) {
+  const c = new Chess(wb.game().fen()), occ = c.get(sq), by = occ ? (occ.color === "w" ? "b" : "w") : c.turn(), arrows = [];
+  for (let round = 0; round < 3; round++) {
+    const from = c.attackers(sq, by);
+    if (!from.length) break;
+    for (const f of from) { arrows.push([f, sq, round ? "red" : "orange"]); c.remove(f); }
+  }
+  if (!arrows.length) { wb.ping(sq); return; }
+  wb.mark([sq], "", arrows);
+  tryMsg(`${arrows.length} ${by === "w" ? "white" : "black"} piece${arrows.length > 1 ? "s" : ""} aimed at <b>${sq}</b>${arrows.some((a) => a[2] === "red") ? ", red ones lined up behind (a battery)" : ""}.`, true);
+}
+// captured pieces and +N next to each player, like chess.com
+const VAL = { p: 1, n: 3, b: 3, r: 5, q: 9 }, FULL = { p: 8, n: 2, b: 2, r: 2, q: 1 }, ICON = { p: "♟", n: "♞", b: "♝", r: "♜", q: "♛" };
+function material() {
+  const gi = lesson?.steps[wi]?.game;
+  if (!gi) return;
+  const have = { w: {}, b: {} };
+  for (const row of wb.game().board()) for (const p of row) if (p) have[p.color][p.type] = (have[p.color][p.type] || 0) + 1;
+  const pts = (col) => Object.entries(have[col]).reduce((a, [t, n]) => a + (VAL[t] || 0) * n, 0), diff = pts("w") - pts("b");
+  const took = (col) => Object.keys(FULL).map((t) => ICON[t].repeat(Math.max(0, FULL[t] - (have[col === "w" ? "b" : "w"][t] || 0)))).join("");
+  const meW = gi.me === "white";
+  for (const [el, col] of [[$("pBot"), meW ? "w" : "b"], [$("pTop"), meW ? "b" : "w"]]) {
+    el.querySelector(".mat")?.remove();
+    const up = col === "w" ? diff : -diff, who = el.querySelector(".who");
+    if (who) who.insertAdjacentHTML("beforeend", `<span class="mat">${took(col)}${up > 0 ? ` +${up}` : ""}</span>`);
+  }
 }
 
 function navUi() {
   $("wtStep").textContent = `${lesson.title} · step ${wi + 1} of ${lesson.steps.length}`;
-  $("wtDots").innerHTML = lesson.steps.map((x, j) => `<button type="button" aria-label="Step ${j + 1}" class="${j === wi ? "on" : x.tone || ""}" data-j="${j}"></button>`).join("");
+  $("wtDots").innerHTML = lesson.steps.length > 24 ? "" : lesson.steps.map((x, j) => `<button type="button" aria-label="Step ${j + 1}" class="${j === wi ? "on" : x.tone || ""}" data-j="${j}"></button>`).join("");
   $("wtPrev").disabled = wi === 0;
   $("wtNext").textContent = wi === lesson.steps.length - 1 ? "Done ✓" : "Next →";
 }
 async function wtShow(i, animate) {
+  $("askOut").textContent = ""; askToken++; // an answer belongs to the card it was asked on
   wi = Math.max(0, Math.min(lesson.steps.length - 1, i));
   const s = lesson.steps[wi], my = ++token;
   explored = [];
   const n = $("wtName"); n.textContent = s.name; n.className = "mvname " + (s.tone || "");
+  $("wtIcon").innerHTML = s.badge ? `<span class="bdg ${s.badge[0]} inl">${s.badge[1]}</span>` : "";
+  $("wtEval").textContent = s.ev || ""; $("wtEval").hidden = !s.ev;
+  $("wtBest").hidden = !s.best;
   $("wtBody").innerHTML = sqLinks(s.body);
   $("wtExtra").innerHTML = (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
     (s.link ? `<a class="btn ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">See your game ↗</a>` : "") +
@@ -382,32 +518,32 @@ async function wtShow(i, animate) {
     if (my !== token) return;
   } else wb.set(s.to, lesson.flip);
   wb.mark(last ? [last.from, last.to] : [], tone, s.arrows);
+  if (s.badge && last) wb.badge(last.to, s.badge[0], s.badge[1]);
   wb.setBusy(false);
   buildTree(s);
+  material();
   evalHere(my);
 }
 wb.onMove(async (m, fromDrag) => {
   explored.push(m.san);
   const my = ++token, before = wb.game().fen(), turnW = wb.game().turn() === "w";
-  const pre = coachEval(before, 60000);
   wb.setBusy(true);
   await wb.play(m, fromDrag ? 0 : 200);
   grow(m);
   wb.mark([m.from, m.to], "last");
+  material();
   const s = lesson.steps[wi];
   if (s.game) bars({ ...s, alt: true, freeze: s.alt ? s.freeze : plyOf(s.to) }, 0);
   const g = wb.game();
   if (g.isCheckmate()) { tryMsg(`<b>${esc(m.san)}</b> is checkmate.`, true); evalBar($("evb"), turnW ? 10000 : -10000, wb.flip()); return; }
   if (g.isGameOver()) { tryMsg(`<b>${esc(m.san)}</b>: it's a draw.`, true); evalBar($("evb"), 0, wb.flip()); return; }
   tryMsg(`<b>${esc(m.san)}</b> · Stockfish is thinking…`, true);
-  const [b, a] = await Promise.all([pre, coachEval(g.fen(), 60000)]);
-  if (my !== token || !b || !a) return;
-  const drop = winPct(b.cp) - winPct(-a.cp), best = b.best === m.from + m.to + (m.promotion || "");
-  const [, cls, sym, word] = best ? CLS[0] : CLS.find((c) => drop < c[0]);
+  const j = await judge(m, before, g.fen(), my);
+  if (!j) return;
+  const { cls, sym, a } = j;
   wb.badge(m.to, cls, sym);
   evalBar($("evb"), turnW ? -a.cp : a.cp, wb.flip());
-  let bestSan = ""; try { bestSan = new Chess(before).move({ from: b.best.slice(0, 2), to: b.best.slice(2, 4), promotion: b.best[4] || "q" }).san; } catch {}
-  tryMsg(`<span class="bdg ${cls} inl">${sym}</span> <b>${esc(m.san)}</b> is ${word}.${best || !bestSan ? "" : ` Best was <b>${esc(bestSan)}</b>.`}`, true);
+  tryMsg(j.msg, true);
   await new Promise((r) => setTimeout(r, 650));
   if (my !== token || !a.best || a.best === "(none)") { wb.setBusy(false); return; }
   const reply = g.moves({ verbose: true }).find((x) => x.from + x.to === a.best.slice(0, 4) && (!x.promotion || x.promotion === (a.best[4] || "q")));
@@ -451,11 +587,12 @@ async function review(user, id) {
   const L = (lesson = await gameLesson(g, [], (fen, nodes) => coach.evaluate(fen, nodes)));
   show("s1");
   prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true); $("wtNext").focus();
+  coachLines(id, g, L);
   // while they go through the lesson, check their last games of this kind for the same mistake
   const hs = habitStep(g, await recentHistory(user, g, month));
   if (!hs || lesson !== L) return;
   Object.assign(hs, { from: hs.start, to: hs.start, mv: [], freeze: null });
-  L.steps.push(hs);
+  L.steps.splice(L.steps.length - 1, 0, hs); // the verdict stays last
   navUi();
 }
 const HABIT_GAMES = 30, HABIT_ENGINES = 2; // light: it runs while they use the lesson
@@ -475,6 +612,37 @@ async function recentHistory(user, g, month) {
   return have;
 }
 
+// ---------- the coach bubble: Claude explains every move from our Stockfish facts, one cached call per game ----------
+async function coachLines(id, g, L) {
+  const me = g.color === "white", sc = scoreOf(g.result); // my score: 1 won, 0.5 drew, 0 lost
+  const result = sc === 0.5 ? "1/2-1/2" : (sc === 1) === me ? "1-0" : "0-1";
+  try {
+    const r = await fetch("https://chess-api.topc.social/game", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, moves: g.san, facts: L.facts, white: me ? STATE.user : g.op, black: me ? g.op : STATE.user, result }) });
+    if (!r.ok) throw new Error("game " + r.status);
+    for (const m of (await r.json()).moves) { const j = L.plyStep[m.ply + 1]; if (j != null) L.steps[j].body = m.text; }
+    if (lesson === L) $("wtBody").innerHTML = sqLinks(L.steps[wi].body);
+  } catch (e) { console.warn("coach lines unavailable, keeping engine text", e); }
+}
+
+// ---------- ask the coach: answered right here by Claude through the Explain Worker, streamed ----------
+async function askHere(q, s, gi, fen, engine) {
+  const out = $("askOut"), my = ++askToken;
+  let n = cur; while (n && n.id > mainLen) n = n.parent; // the game move this board hangs off
+  const ply = Math.max(0, (n ? n.id : 1) - 1), meW = gi.me === "white";
+  const verdict = `${s.name}. ${s.body}${explored.length ? ` | Moves the player tried on the board: ${explored.join(" ")}` : ""} | Stockfish on the board now: ${engine}`.slice(0, 500);
+  out.textContent = "Coach is thinking…";
+  try {
+    const r = await fetch("https://chess-api.topc.social/explain", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ moves: gi.san, ply, verdict, question: q.slice(0, 400), fen, white: meW ? STATE.user : gi.op, black: meW ? gi.op : STATE.user }) });
+    if (!r.ok) throw new Error("explain " + r.status);
+    const rd = r.body.getReader(), dec = new TextDecoder();
+    let text = "";
+    for (;;) { const { done, value } = await rd.read(); if (done || my !== askToken) break; text += dec.decode(value, { stream: true }); out.innerHTML = sqLinks(text); }
+  } catch (e) { console.warn(e); if (my === askToken) out.textContent = "The coach couldn't answer right now. Try again in a moment."; }
+}
+let askToken = 0;
+
 // ---------- ask Claude (runs on the visitor's own Claude account) ----------
 function pvSan(fen, pv) { const c = new Chess(fen), out = []; for (const u of (pv || "").split(" ").filter(Boolean).slice(0, 6)) { try { out.push(c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] || "q" }).san); } catch { break; } } return out.join(" "); }
 const evalTxt = (cp, wtm) => { const w = wtm ? cp : -cp; return Math.abs(w) >= 9000 ? (w > 0 ? "White mates" : "Black mates") : `${w >= 0 ? "+" : ""}${(w / 100).toFixed(1)} (White's view)`; };
@@ -484,6 +652,7 @@ async function askClaude(q) {
   const g = wb.game(), fen = g.fen(), wtm = g.turn() === "w", s = lesson.steps[wi];
   const here = await coachEval(fen, 250000);
   const gi = s.game;
+  if (gi && gi.san && mainLen) return askHere(q, s, gi, fen, `${evalTxt(here.cp, wtm)}, best line ${pvSan(fen, here.pv)}`);
   const prompt = `You're my chess coach. Answer in plain words, at most 150 words. Use square names (e4) and normal move notation.
 
 About me: chess.com player ${STATE.user}, about ${gi ? gi.myR : STATE.stats.ratingLast} rated in ${STATE.tc}.${gi ? ` In this game I was ${gi.me} against ${gi.op} (${gi.opR}), ${gi.res.replace(/^You /, "I ").toLowerCase()}.` : ""}${STATE.game ? `
@@ -500,18 +669,23 @@ My question: ${q}`;
   let copied = false;
   try { await navigator.clipboard.writeText(prompt); copied = true; } catch {}
   const url = "https://claude.ai/new?q=" + encodeURIComponent(prompt);
-  // a side window, so the board stays in view; same name, so follow-ups reuse it
-  const w = Math.min(560, Math.round(screen.availWidth * 0.4));
-  window.open(url, "cc-claude", `popup,width=${w},height=${screen.availHeight},left=${screen.availWidth - w},top=0`);
-  out.innerHTML = `Opened Claude beside the board with your question.${copied ? " It's also copied: if the box is empty there, paste it." : ""} <a href="${url}" target="_blank" rel="noopener">Open again ↗</a>`;
+  window.open(url, "_blank", "noopener");
+  out.innerHTML = `Opened Claude in a new tab with your question.${copied ? " It's also copied: if the box is empty there, paste it." : ""} <a href="${url}" target="_blank" rel="noopener">Open again ↗</a>`;
 }
 
 document.addEventListener("click", (ev) => {
   const b = ev.target.closest("[data-wt]");
   if (b) { lesson = STATE.lessons.find((l) => l.key === b.dataset.wt); if (lesson) { prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true); $("wtNext").focus(); } }
-  const mv = ev.target.closest("#mvList button"); if (mv) goTo(nodes[+mv.dataset.n]);
+  const mv = ev.target.closest("#mvList button");
+  if (mv) nav(nodes[+mv.dataset.n]);
   const dot = ev.target.closest("#wtDots button"); if (dot) wtShow(+dot.dataset.j, false);
-  const ref = ev.target.closest(".sqref"); if (ref) wb.ping(ref.dataset.sq);
+  const ref = ev.target.closest(".sqref");
+  if (ref) {
+    const s = lesson.steps[wi], t = ref.textContent.trim();
+    if (s.best && t === s.bestSan) showBest();
+    else if (/^[a-h][1-8]$/.test(t)) showAttackers(t);
+    else playLine(ref).then((ok) => ok || showSan(t)).then((ok) => ok || wb.ping(ref.dataset.sq));
+  }
   const chip = ev.target.closest("#askChips button"); if (chip) askClaude(chip.textContent);
   if (ev.target === wtEl) wtEl.hidden = true;
 });
@@ -520,13 +694,16 @@ $("wtClose").addEventListener("click", () => (wtEl.hidden = true));
 $("wtPrev").addEventListener("click", () => wtShow(wi - 1, false));
 $("wtNext").addEventListener("click", () => (wi === lesson.steps.length - 1 ? (wtEl.hidden = true) : wtShow(wi + 1, true)));
 $("wtReplay").addEventListener("click", () => wtShow(wi, true));
-$("mvPrev").addEventListener("click", () => goTo(cur.parent));
-$("mvNext").addEventListener("click", () => goTo(cur.kids[0]));
+$("mvPrev").addEventListener("click", () => nav(cur.parent));
+$("mvNext").addEventListener("click", () => nav(cur.kids[0]));
+$("mvFirst").addEventListener("click", () => nav(nodes[0]));
+$("mvLast").addEventListener("click", () => { let n = cur; while (n.kids.length) n = n.kids[0]; nav(n); });
+$("wtBest").addEventListener("click", showBest);
 $("tryReset").addEventListener("click", () => wtShow(wi, false));
 document.addEventListener("keydown", (ev) => {
   if (wtEl.hidden || ev.target.closest("input")) return;
-  if (ev.key === "ArrowRight") goTo(cur.kids[0]);
-  if (ev.key === "ArrowLeft") goTo(cur.parent);
+  if (ev.key === "ArrowRight") nav(cur.kids[0]);
+  if (ev.key === "ArrowLeft") nav(cur.parent);
   if (ev.key === "Escape") wtEl.hidden = true;
 });
 

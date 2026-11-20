@@ -75,6 +75,7 @@ export async function analyseGame(game, me, evaluate) {
     myRating: meSide.rating, op: op.username, opRating: op.rating,
     eco: (game.eco || "").split("/").pop(), start: game.initial_setup || null,
     san, clocks, moves,
+    evals: evals.map((e) => e.cp), bests: evals.map((e) => e.best), // per position, from the player's side
   };
 }
 

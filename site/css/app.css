@@ -76,6 +76,7 @@ button:focus-visible, input:focus-visible, a:focus-visible, label:focus-within {
 .lb .h.badge { z-index: 4; background: transparent; }
 .bdg { position: absolute; top: -18%; right: -18%; width: 52%; height: 52%; border-radius: 50%; display: grid; place-items: center; font: 800 clamp(9px, 1.6vw, 13px) var(--body); color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); border: 1.5px solid #fff; }
 .bdg.inl { position: static; display: inline-grid; width: 22px; height: 22px; font-size: 11px; vertical-align: -5px; border: 0; }
+.bdg.mvb { width: 16px; height: 16px; font-size: 9px; vertical-align: -3px; }
 .bdg.best { background: #81b64c; } .bdg.exc { background: #96bc4b; } .bdg.good { background: #77915f; }
 .bdg.inacc { background: #f7c045; } .bdg.mist { background: #e58f2a; } .bdg.blun { background: #ca3431; }
 .mvnav { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
@@ -246,3 +247,26 @@ html, body { margin: 0; }
 .step .ic { font: 800 18px var(--display); color: var(--go); }
 .foot a { color: inherit; }
 #askOut a { color: var(--go); }
+/* review panel laid out like chess.com's Game Review */
+.wt .coach { display: grid; grid-template-columns: 64px 1fr; gap: 12px; align-items: start; }
+.wt .cav { width: 64px; height: 64px; border-radius: 50%; background: var(--card2); display: grid; place-items: center; font-size: 36px; }
+.wt .bubble { background: #fff; color: #222; border-radius: 14px; padding: 12px 14px; display: grid; gap: 6px; }
+.wt .bubble .bh { display: flex; align-items: center; gap: 8px; }
+.wt .bubble .mvname { font: 700 17px var(--body); flex: 1; color: #222; }
+.wt .bubble .mvname.bad, .wt .bubble .mvname.good { color: #222; }
+.wt .bubble .body { font-size: 15px; margin: 0; }
+.wt .bubble .stat { background: #eee; color: #222; }
+.wt .evbox { background: #222; color: #fff; font: 700 13px var(--mono); padding: 3px 7px; border-radius: 5px; }
+.wt .mvlist { display: block; max-height: 240px; overflow-y: auto; white-space: normal; background: var(--card2); border-radius: 8px; padding: 4px 0; }
+.wt .mrow { display: grid; grid-template-columns: 36px 1fr 1fr; align-items: center; padding: 1px 10px; }
+.wt .mrow:nth-child(odd) { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.wt .mrow .no { color: var(--muted); }
+.wt .mvar { padding: 2px 10px 2px 46px; color: var(--muted); font-size: 12px; }
+.wt .graph { width: 100%; height: 70px; border-radius: 6px; cursor: pointer; }
+.wt .graph .gb { fill: #3a3a3a; } .wt .graph .gw { fill: #f2f2f2; } .wt .graph .gm { stroke: #888; stroke-width: .2; }
+.wt .graph .gc { stroke: var(--go); stroke-width: .5; } .wt .graph .gd.inacc { fill: #f7c045; } .wt .graph .gd.mist { fill: #e58f2a; } .wt .graph .gd.blun { fill: #ca3431; }
+.wt .ctl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.wt .ask summary { cursor: pointer; font: 600 13px var(--body); color: var(--muted); }
+.wt .askout:empty { display: none; }
+.wt .askout { margin: 4px 0 0; padding-top: 10px; border-top: 1px solid #e3e3e3; font-size: 15px; line-height: 1.5; white-space: pre-wrap; max-height: 40vh; overflow-y: auto; }
+.wt .mat { color: var(--muted); font-size: 13px; letter-spacing: -1px; margin-left: 6px; }

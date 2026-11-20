@@ -12,7 +12,7 @@ const SYSTEM = `You are a friendly chess coach for club players (roughly 600-160
 Explain the move the player is looking at in plain words, at most 100 words, plain text only: no markdown, no bold, no headings.
 Say why it is good or bad, what was better and why, and the concrete line that punishes it if there is one.
 Use normal move notation and square names. Work from the FEN positions given, check every line you mention is legal there, and if you are not sure about a line, say so rather than guess.
-chess.com's verdict comes from its engine; trust its label, and explain it rather than argue with it.`;
+The review's verdict comes from an engine; trust its label, and explain it rather than argue with it. If the player asks a question, answer it directly.`;
 
 const GAME_SYSTEM = `You are a friendly chess coach for club players (roughly 600-1600 rated) reviewing a finished game on chess.com.
 For every move of the game, write a short explanation the player will read when they reach that move in the review: at most 45 words, plain text, no markdown.
@@ -76,9 +76,10 @@ async function handle(req, env, ctx, origin) {
     if (!ORIGINS.includes(origin)) return json({ error: 'forbidden' }, 403);
     let b;
     try { b = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
-    const { moves, ply = 0, verdict = '', white = '', black = '', result = '' } = b || {};
+    const { moves, ply = 0, verdict = '', white = '', black = '', result = '', question = '', fen = '' } = b || {};
     if (!Array.isArray(moves) || moves.length > 600 || !moves.every((m) => str(m, 10)) || !Number.isInteger(ply) || ply < 0 || ply >= moves.length
-      || !str(verdict, 500) || !str(white, 40) || !str(black, 40) || !str(result, 10)) return json({ error: 'bad request' }, 400);
+      || !str(verdict, 500) || !str(white, 40) || !str(black, 40) || !str(result, 10) || !str(question, 400) || !str(fen, 100)) return json({ error: 'bad request' }, 400);
+    if (fen) try { new Chess(fen); } catch { return json({ error: 'bad position' }, 400); }
     if (path === '/game') return wholeGame(b, env, ctx);
 
     const c = new Chess();
@@ -92,9 +93,9 @@ Moves: ${numbered}
 The move: ${no}${moves[ply]} by ${mover}.
 Position before it (FEN): ${before}
 Position after it (FEN): ${c.fen()}
-chess.com's Game Review says: "${verdict}"
+The review says: "${verdict}"${fen ? `\nThe board the player is looking at now (FEN, may be a side line they tried): ${fen}` : ''}
 
-Explain this move.`;
+${question ? `The player asks: ${question}\nAnswer that question about this position.` : 'Explain this move.'}`;
 
     // streamed as plain text, so the first words show in a couple of seconds instead of after the whole answer
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });

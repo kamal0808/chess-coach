@@ -61,9 +61,10 @@ async function explain(btn) {
   if (!box) {
     box = document.createElement("div");
     box.id = "cc-answer";
-    box.style.cssText = "margin:10px 0;padding:12px 14px;border-radius:10px;background:#fff;color:#222;font:15px/1.45 system-ui,sans-serif;white-space:pre-wrap";
-    const row = btn.parentElement;
-    (row && row !== document.body ? row : btn).after(box);
+    // fixed over chess.com's panel, under the button: inside their layout it can end up clipped or wiped on re-render
+    const r = btn.getBoundingClientRect();
+    box.style.cssText = `position:fixed;z-index:99999;left:${Math.max(8, r.left)}px;top:${r.bottom + 8}px;width:${Math.min(520, innerWidth - 16)}px;max-height:60vh;overflow:auto;padding:12px 14px;border-radius:10px;background:#fff;color:#222;font:15px/1.45 system-ui,sans-serif;white-space:pre-wrap;box-shadow:0 8px 24px rgba(0,0,0,.45)`;
+    document.body.append(box);
   }
   box.dataset.ply = ply;
   box.textContent = "💡 Thinking about this move…";
@@ -74,7 +75,7 @@ async function explain(btn) {
       body: JSON.stringify({ moves: san, ply, verdict: verdict(), white: h.White, black: h.Black, result: h.Result }) });
     const d = await r.json();
     if (box.dataset.ply === String(ply)) box.textContent = d.text ? "💡 " + d.text : d.error || "Couldn't explain this one, try again.";
-  } catch { box.textContent = "Couldn't reach Chess Coach, try again in a few seconds."; }
+  } catch (e) { console.warn("[Chess Coach] explain failed", e); box.textContent = "Couldn't reach Chess Coach, try again in a few seconds."; }
   btn.disabled = false;
 }
 function addExplain() {
@@ -89,7 +90,8 @@ function addExplain() {
   b.textContent = "💡 Explain";
   b.title = "Chess Coach: ask your Claude why";
   b.style.cssText = "flex:1;min-height:48px;margin-right:8px;border:0;border-radius:6px;background:#3c3a37;color:#fff;font:700 16px system-ui,sans-serif;cursor:pointer;box-shadow:0 3px 0 #2b2926";
-  b.addEventListener("click", () => explain(b));
+  // capture phase, so chess.com's own handlers can't swallow the click
+  b.addEventListener("click", (e) => { e.stopPropagation(); e.preventDefault(); explain(b); }, true);
   if (next) next.before(b);
   else { b.style.cssText += ";position:fixed;right:20px;bottom:84px;z-index:99999;flex:none;padding:0 20px"; document.body.append(b); }
 }

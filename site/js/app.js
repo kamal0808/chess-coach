@@ -429,24 +429,30 @@ async function showSan(tok) {
   }
   return false;
 }
-// a move inside a written line ("17...Bf5 18.Bxg5 Qg6"): replay the line from where it starts in the game up to the tapped move.
-// Returns false when the tapped move isn't in a numbered line, so the caller tries it on its own.
+// a move inside a written line ("After 5...dxc6, 6.Nxe5? runs into 6...Bxf2+! 7.Kxf2 Qd4+"): replay the chain of moves written
+// before it whose numbers follow on, from where the chain's first move starts in the game. The chain can leave the game
+// (5...dxc6 where the game had 5...bxc6), so it must start at its own first move, not at the game's.
+// Returns false when the tapped move isn't in a numbered chain, so the caller tries it on its own.
 async function playLine(ref) {
-  const toks = [ref];
-  for (let n = ref.previousSibling; n; n = n.previousSibling) {
-    if (n.nodeType === 1 && n.classList.contains("sqref")) toks.unshift(n);
-    else if (!(n.nodeType === 3 && /^\s*$/.test(n.textContent))) break;
+  const gi = lesson.steps[wi].game;
+  if (!gi || !gi.san) return false;
+  const refs = [...ref.parentElement.querySelectorAll(".sqref")], plies = [];
+  let prev = null;
+  for (const r of refs) {
+    const t = r.textContent.trim(), b = r.previousSibling;
+    const num = t.match(/^(\d+)\s*(\.\.\.|…|\.)/) || (b && b.nodeType === 3 ? b.textContent.match(/(\d+)\s*(\.\.\.|…|\.)\s*$/) : null);
+    prev = num ? (num[1] - 1) * 2 + (num[2] === "." ? 0 : 1) : /^[a-h][1-8]$/.test(t) || prev == null ? null : prev + 1;
+    plies.push(prev);
   }
-  // the move number sits in the first token ("18.Bxg5") or in the text just before it ("17... Bf5")
-  const before = toks[0].previousSibling, gi = lesson.steps[wi].game;
-  const num = toks[0].textContent.match(/^(\d+)\s*(\.\.\.|…|\.)/) || (before && before.nodeType === 3 ? before.textContent.match(/(\d+)\s*(\.\.\.|…|\.)\s*$/) : null);
-  if (!num || !gi || !gi.san) return false;
-  const start = (num[1] - 1) * 2 + (num[2] === "." ? 0 : 1);
-  if (start > gi.san.length) return false;
+  const k = refs.indexOf(ref);
+  if (plies[k] == null) return false;
+  let i = k;
+  while (i > 0 && plies[i - 1] != null && plies[i - 1] === plies[i] - 1) i--;
+  if (plies[i] > gi.san.length) return false;
   const c = new Chess(gi.start || undefined);
-  for (const m of gi.san.slice(0, start)) c.move(m);
+  for (const m of gi.san.slice(0, plies[i])) c.move(m);
   const fen = c.fen(), mv = [];
-  for (const t of toks) { try { mv.push(c.move(t.textContent.trim().replace(/^\d+\s*(?:\.\.\.|\.|…)\s*/, ""))); } catch { return false; } }
+  for (const t of refs.slice(i, k + 1)) { try { mv.push(c.move(t.textContent.trim().replace(/^\d+\s*(?:\.\.\.|\.|…)\s*/, ""))); } catch { return false; } }
   const my = ++token;
   wb.set(fen, lesson.flip); wb.mark([], "");
   for (const m of mv) { await wb.play(m, 320); if (my !== token) return true; }

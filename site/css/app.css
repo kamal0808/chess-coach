@@ -268,4 +268,4 @@ html, body { margin: 0; }
 .wt .ctl { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
 .wt .ask summary { cursor: pointer; font: 600 13px var(--body); color: var(--muted); }
 .wt .askout:empty { display: none; }
-.wt .askout { margin: 0; background: #fff; color: #222; border-radius: 12px; padding: 10px 14px; font-size: 15px; line-height: 1.5; white-space: pre-wrap; }
+.wt .askout { margin: 4px 0 0; padding-top: 10px; border-top: 1px solid #e3e3e3; font-size: 15px; line-height: 1.5; white-space: pre-wrap; max-height: 40vh; overflow-y: auto; }

@@ -79,18 +79,18 @@
             <div class="bh"><span id="wtIcon"></span><span class="mvname" id="wtName"></span><span class="evbox" id="wtEval"></span></div>
             <p class="body" id="wtBody"></p>
             <div id="wtExtra"></div>
+            <p class="askout" id="askOut" aria-live="polite"></p>
           </div>
         </div>
         <div class="nav"><button class="btn ghost" type="button" id="wtBest">★ Best</button><button class="btn" type="button" id="wtNext">Next →</button></div>
-        <div class="mvlist" id="mvList" aria-label="Moves"></div>
-        <svg class="graph" id="wtGraph" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"></svg>
-        <div class="ctl"><button class="btn ghost" type="button" id="mvFirst" aria-label="First move">⏮</button><button class="btn ghost" type="button" id="mvPrev" aria-label="Previous move">‹</button><button class="btn ghost" type="button" id="mvNext" aria-label="Next move">›</button><button class="btn ghost" type="button" id="mvLast" aria-label="Last move">⏭</button></div>
         <details class="ask" id="ask" open>
           <summary>Ask the coach about this board</summary>
           <div class="chips" id="askChips"><button type="button">Why is this the best move?</button><button type="button">What's my plan from here?</button><button type="button">What is my opponent threatening?</button></div>
           <form class="askf" id="askForm"><input id="askIn" autocomplete="off" maxlength="300" placeholder="e.g. why isn't my bishop sacrifice brilliant?" aria-label="Your question"><button class="btn sm" type="submit">Ask</button></form>
-          <p class="askout" id="askOut" aria-live="polite"></p>
         </details>
+        <div class="mvlist" id="mvList" aria-label="Moves"></div>
+        <svg class="graph" id="wtGraph" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div class="ctl"><button class="btn ghost" type="button" id="mvFirst" aria-label="First move">⏮</button><button class="btn ghost" type="button" id="mvPrev" aria-label="Previous move">‹</button><button class="btn ghost" type="button" id="mvNext" aria-label="Next move">›</button><button class="btn ghost" type="button" id="mvLast" aria-label="Last move">⏭</button></div>
         <div class="dots" id="wtDots"></div>
         <button class="btn ghost sm" type="button" id="wtPrev" hidden>← Back</button><button type="button" id="wtReplay" hidden></button>
       </div>

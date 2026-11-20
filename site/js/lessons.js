@@ -179,6 +179,9 @@ const HABITS = [
 ];
 const BIG = 20;
 
+// how much a move cost: a real mistake (10+ points of winning chance) always outranks a slip (1+ pawn given back while winning)
+const pawns = (m) => (Math.abs(m.before) >= MATE - 100 || Math.abs(m.after) >= MATE - 100 ? 0 : (m.before - m.after) / 100);
+const cost = (m) => (m.drop >= 10 ? 1000 + m.drop : m.before >= 200 && pawns(m) >= 1 ? pawns(m) : 0);
 const topMistake = (g) => [...g.moves].sort((a, b) => b.drop - a.drop).find((m) => m.drop >= BIG);
 // "This one is a habit" when the game's worst move is a kind the player made in 3+ of their other analysed games, else null
 export function habitStep(g, history) {
@@ -199,11 +202,13 @@ export function habitStep(g, history) {
 // and if the worst one is a kind the player keeps making in `history` (their other analysed games), say so.
 export async function gameLesson(g, history, evaluate) {
   const info = gameInfo(g), side = g.color;
-  const worst = g.moves.filter((m) => m.drop >= 10).sort((a, b) => b.drop - a.drop).slice(0, 3).sort((a, b) => a.ply - b.ply);
+  const worst = g.moves.filter((m) => cost(m) > 0).sort((a, b) => cost(b) - cost(a)).slice(0, 3).sort((a, b) => a.ply - b.ply);
+  const slipsOnly = worst.length && worst.every((m) => m.drop < 10);
   const steps = [{
     start: g.start || START, moves: g.san.slice(0, worst.length ? worst[0].ply - 1 : g.san.length).join(" "), game: info,
     name: `Your game vs ${info.op}`, stat: info.res,
     body: !worst.length ? "No real mistakes in this one: the engine has nothing to teach you here. Try your own ideas on the board."
+      : slipsOnly ? `You were winning most of this game, but ${worst.length === 1 ? "one move" : `${worst.length} moves`} gave some of it back. Let's go through ${worst.length === 1 ? "it" : "them"}.`
       : worst.length === 1 ? "One move decided this game. Let's go to it." : `${worst.length} moves decided this game. Let's go through them.`,
   }];
   let turn = null; // the costliest move, for the closing verdict
@@ -212,7 +217,7 @@ export async function gameLesson(g, history, evaluate) {
     const rep = after.isGameOver() ? null : await evaluate(after.fen(), DEEP);
     const reply = rep ? uciLine(after.fen(), rep.pv, 1)[0] : null;
     const deep = await evaluate(before, DEEP), better = uciLine(before, deep.pv, 3), b0 = better[0] || "";
-    const [kind, sym] = m.drop >= 30 ? ["Blunder", "??"] : m.drop >= BIG ? ["Mistake", "?"] : ["Inaccuracy", "?!"];
+    const [kind, sym] = m.drop >= 30 ? ["Blunder", "??"] : m.drop >= BIG ? ["Mistake", "?"] : m.drop >= 10 ? ["Inaccuracy", "?!"] : ["Slip", "?!"];
     steps.push({ start: before, moves: "", game: info, name: `${kind}: move ${Math.ceil(m.ply / 2)}`, stat: `${evalWords(m.before)} for you`,
       body: "Before you look at your move: what is attacked, and what can you take?" });
     steps.push({
@@ -220,7 +225,7 @@ export async function gameLesson(g, history, evaluate) {
       name: `${moveNo(m.ply)}${m.san}${sym}${reply ? ` ${moveNo(m.ply + 1)}${reply}` : ""}`, stat: `${evalWords(m.before)} → ${evalWords(m.after)}`,
       body: reply && reply.includes("x") ? `This lets ${info.op} play ${reply}.` : reply ? `Best answer: ${reply}, and your position gets worse.` : "This throws the game away.",
     });
-    if (!turn || m.drop > turn.m.drop) turn = { m, reply, b0, before };
+    if (!turn || cost(m) > cost(turn.m)) turn = { m, reply, b0, before };
     if (b0) steps.push({
       start: before, moves: better.join(" "), game: info, alt: true, tone: "good", name: `Better: ${moveNo(m.ply)}${b0}!`,
       stat: `Engine: ${evalWords(mineCp(deep, before, side))}`, body: `${b0} is the move here. Try your own moves on the board, and ask Claude why if it isn't clear.`,
@@ -228,8 +233,28 @@ export async function gameLesson(g, history, evaluate) {
   }
   const hs = habitStep(g, history);
   if (hs) steps.push(hs);
+  const ws = wonStep(g, info);
+  if (ws) steps.push(ws);
   steps.push(verdictStep(g, info, turn, worst.length));
   return { key: "game", title: "Game review", flip: side === "black", steps };
+}
+
+// How the game was won: the opponent's move that handed over the most, and the player's answer.
+function wonStep(g, info) {
+  if (scoreOf(g.result) !== 1) return null;
+  let best = null;
+  for (let i = 1; i < g.moves.length; i++) {
+    const prev = g.moves[i - 1], m = g.moves[i], swing = m.before - prev.after;
+    if (m.ply - prev.ply !== 2 || Math.abs(m.before) >= MATE - 100 || Math.abs(prev.after) >= MATE - 100) continue;
+    if (swing >= 150 && (!best || swing > best.swing)) best = { prev, m, swing };
+  }
+  if (!best) return null;
+  const { prev, m, swing } = best, opp = g.san[m.ply - 2];
+  return {
+    start: fenAt(g, m.ply - 2), moves: [opp, m.san].join(" "), game: info, tone: "good", name: `Where you won it: ${moveNo(m.ply - 1)}${opp}?`,
+    stat: `${evalWords(prev.after)} → ${evalWords(m.before)}`,
+    body: `${info.op} played ${opp} and handed you ${(swing / 100).toFixed(1)} pawns. You answered ${m.san}. That is where the game turned your way.`,
+  };
 }
 
 // Closing card: an honest verdict built only from what the engine found, never praise the game doesn't back up.
@@ -239,12 +264,13 @@ function verdictStep(g, info, turn, count) {
     body: lost ? "No single move lost this one: the engine found no big mistake. Look at the clock and the plan, not the tactics."
       : "No move cost you much in this game. Nothing to fix here." };
   const { m, reply, b0, before } = turn, top = topMistake(g);
-  const others = count - 1;
+  const others = count - 1, slip = m.drop < 10;
   return {
     start: before, moves: [m.san, reply].filter(Boolean).join(" "), game: info, tone: "bad", link: g.url,
     name: lost ? "Where you lost it" : won ? "You won, but here it slipped" : "Where the win got away",
     stat: `${info.res} · move ${Math.ceil(m.ply / 2)}: ${evalWords(m.before)} → ${evalWords(m.after)}`,
-    body: `The game turned on ${moveNo(m.ply)}${m.san}.${reply ? ` It let ${info.op} play ${reply}.` : ""}${b0 ? ` ${b0} was the move.` : ""}` +
+    body: slip ? `${moveNo(m.ply)}${m.san} gave back ${pawns(m).toFixed(1)} pawns of a winning position.${b0 ? ` ${b0} was cleaner.` : ""}` +
+      (others ? ` ${others === 1 ? "One more move" : `${others} more moves`} gave some back too.` : "") : `The game turned on ${moveNo(m.ply)}${m.san}.${reply ? ` It let ${info.op} play ${reply}.` : ""}${b0 ? ` ${b0} was the move.` : ""}` +
       (others ? ` ${others === 1 ? "One more move" : `${others} more moves`} cost you too, but this is the one to fix first.` : ""),
     rule: (top && HABITS.find((k) => k.test(g, top)) || HABITS[2]).rule,
   };

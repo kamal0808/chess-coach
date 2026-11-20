@@ -16,7 +16,7 @@ The review's verdict comes from an engine; trust its label, and explain it rathe
 
 const GAME_SYSTEM = `You are a friendly chess coach for club players (roughly 600-1600 rated) reviewing a finished game on chess.com.
 For every move of the game, write a short explanation the player will read when they reach that move in the review: at most 45 words, plain text, no markdown.
-Every move comes with Stockfish's verdict: its label, the mover's win chance before and after, the best move and line, and the opponent's best reply. Those facts are true: never contradict the label, explain it.
+Every move comes with Stockfish's verdict: its label, the mover's win chance before and after, the best move and line, and the opponent's best reply. Those facts are true: never contradict the label, and never call a move by a different verdict word (an inaccuracy is never "excellent"); explain the label you were given.
 For a mistake or worse, say what it allowed (use the reply) and why the best move was better (use its line). For best and excellent moves, say what they do. Opening moves get one short line.
 Use normal move notation and square names, and only lines given to you or ones you are sure are legal in the FEN.`;
 const SCHEMA = { type: 'object', additionalProperties: false, required: ['moves'], properties: { moves: { type: 'array', items: {
@@ -27,7 +27,9 @@ async function wholeGame(b, env, ctx) {
   const { id, moves, facts, white = '', black = '', result = '' } = b;
   const ok = (f, i) => f && f.ply === i && ['label', 'best', 'bestLine', 'reply'].every((k) => str(f[k], 60)) && [f.winBefore, f.winAfter].every((n) => Number.isInteger(n) && n >= 0 && n <= 100);
   if (!/^\d{1,20}$/.test(String(id)) || !Array.isArray(facts) || facts.length !== moves.length || !facts.every(ok)) return json({ error: 'bad request' }, 400);
-  const key = new Request(`https://chess-api.topc.social/cache/game/v2/${id}`);
+  // keyed by the labels too: two engine runs can label a move differently, and the text must match the labels shown
+  const sig = [...new Uint8Array(await crypto.subtle.digest('SHA-1', new TextEncoder().encode(facts.map((f) => f.label).join(','))))].map((x) => x.toString(16).padStart(2, '0')).join('');
+  const key = new Request(`https://chess-api.topc.social/cache/game/v3/${id}/${sig}`);
   const hit = await caches.default.match(key);
   if (hit) return json(await hit.json());
   const c = new Chess(), lines = [];

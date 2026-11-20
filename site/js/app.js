@@ -429,6 +429,33 @@ async function showSan(tok) {
   }
   return false;
 }
+// a move inside a written line ("17...Bf5 18.Bxg5 Qg6"): replay the line from where it starts in the game up to the tapped move.
+// Returns false when the tapped move isn't in a numbered line, so the caller tries it on its own.
+async function playLine(ref) {
+  const toks = [ref];
+  for (let n = ref.previousSibling; n; n = n.previousSibling) {
+    if (n.nodeType === 1 && n.classList.contains("sqref")) toks.unshift(n);
+    else if (!(n.nodeType === 3 && /^\s*$/.test(n.textContent))) break;
+  }
+  // the move number sits in the first token ("18.Bxg5") or in the text just before it ("17... Bf5")
+  const before = toks[0].previousSibling, gi = lesson.steps[wi].game;
+  const num = toks[0].textContent.match(/^(\d+)\s*(\.\.\.|…|\.)/) || (before && before.nodeType === 3 ? before.textContent.match(/(\d+)\s*(\.\.\.|…|\.)\s*$/) : null);
+  if (!num || !gi || !gi.san) return false;
+  const start = (num[1] - 1) * 2 + (num[2] === "." ? 0 : 1);
+  if (start > gi.san.length) return false;
+  const c = new Chess(gi.start || undefined);
+  for (const m of gi.san.slice(0, start)) c.move(m);
+  const fen = c.fen(), mv = [];
+  for (const t of toks) { try { mv.push(c.move(t.textContent.trim().replace(/^\d+\s*(?:\.\.\.|\.|…)\s*/, ""))); } catch { return false; } }
+  const my = ++token;
+  wb.set(fen, lesson.flip); wb.mark([], "");
+  for (const m of mv) { await wb.play(m, 320); if (my !== token) return true; }
+  const last = mv[mv.length - 1];
+  wb.mark([last.from, last.to], "last", [[last.from, last.to, "green"]]);
+  tryMsg(`The coach's line: <b>${esc(mv.map((m) => m.san).join(" "))}</b>`, true);
+  material(); evalHere(my);
+  return true;
+}
 // direct attackers in orange, and the pieces lined up behind them (a battery, an x-ray) too
 function showAttackers(sq) {
   const c = new Chess(wb.game().fen()), occ = c.get(sq), by = occ ? (occ.color === "w" ? "b" : "w") : c.turn(), arrows = [];
@@ -657,7 +684,7 @@ document.addEventListener("click", (ev) => {
     const s = lesson.steps[wi], t = ref.textContent.trim();
     if (s.best && t === s.bestSan) showBest();
     else if (/^[a-h][1-8]$/.test(t)) showAttackers(t);
-    else showSan(t).then((ok) => ok || wb.ping(ref.dataset.sq));
+    else playLine(ref).then((ok) => ok || showSan(t)).then((ok) => ok || wb.ping(ref.dataset.sq));
   }
   const chip = ev.target.closest("#askChips button"); if (chip) askClaude(chip.textContent);
   if (ev.target === wtEl) wtEl.hidden = true;

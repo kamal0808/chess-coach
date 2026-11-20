@@ -9,7 +9,7 @@ const json = (body, status = 200) => new Response(JSON.stringify(body), { status
 const str = (v, max) => typeof v === 'string' && v.length <= max;
 
 const SYSTEM = `You are a friendly chess coach for club players (roughly 600-1600 rated) reviewing a finished game on chess.com.
-Explain the move the player is looking at in plain words, at most 120 words, no headings.
+Explain the move the player is looking at in plain words, at most 100 words, plain text only: no markdown, no bold, no headings.
 Say why it is good or bad, what was better and why, and the concrete line that punishes it if there is one.
 Use normal move notation and square names. Work from the FEN positions given, check every line you mention is legal there, and if you are not sure about a line, say so rather than guess.
 chess.com's verdict comes from its engine; trust its label, and explain it rather than argue with it.`;
@@ -41,23 +41,29 @@ chess.com's Game Review says: "${verdict}"
 
 Explain this move.`;
 
-    try {
-      const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-      const r = await client.beta.messages.create({
-        model: 'claude-opus-5-5',
-        max_tokens: 16000,
-        betas: ['server-side-fallback-2026-07-01'],
-        fallbacks: 'default',
-        output_config: { effort: 'medium' },
-        system: SYSTEM,
-        messages: [{ role: 'user', content: user }],
-      });
-      if (r.stop_reason === 'refusal') return json({ error: 'Claude declined this one.' }, 502);
-      const text = r.content.filter((x) => x.type === 'text').map((x) => x.text).join('\n').trim();
-      return json({ text });
-    } catch (err) {
-      console.error(err instanceof Anthropic.APIError ? `API ${err.status}: ${err.message}` : String(err));
-      return json({ error: 'Claude is busy, try again.' }, 502);
-    }
+    // streamed as plain text, so the first words show in a couple of seconds instead of after the whole answer
+    const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+    const { readable, writable } = new TransformStream();
+    const w = writable.getWriter(), enc = new TextEncoder();
+    (async () => {
+      try {
+        const stream = client.beta.messages.stream({
+          model: 'claude-opus-5-5',
+          max_tokens: 16000,
+          betas: ['server-side-fallback-2026-07-01'],
+          fallbacks: 'default',
+          output_config: { effort: 'low' }, // speed matters more than depth for a one-move explanation
+          system: SYSTEM,
+          messages: [{ role: 'user', content: user }],
+        });
+        for await (const ev of stream) if (ev.type === 'content_block_delta' && ev.delta.type === 'text_delta') await w.write(enc.encode(ev.delta.text));
+        if ((await stream.finalMessage()).stop_reason === 'refusal') await w.write(enc.encode('Claude declined this one.'));
+      } catch (err) {
+        console.error(err instanceof Anthropic.APIError ? `API ${err.status}: ${err.message}` : String(err));
+        await w.write(enc.encode('\nClaude is busy, try again.'));
+      }
+      await w.close();
+    })();
+    return new Response(readable, { headers: { ...CORS, 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
   },
 };

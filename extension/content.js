@@ -61,9 +61,10 @@ async function explain(btn) {
   if (!box) {
     box = document.createElement("div");
     box.id = "cc-answer";
-    // fixed over chess.com's panel, under the button: inside their layout it can end up clipped or wiped on re-render
-    const r = btn.getBoundingClientRect();
-    box.style.cssText = `position:fixed;z-index:99999;left:${Math.max(8, r.left)}px;top:${r.bottom + 8}px;width:${Math.min(520, innerWidth - 16)}px;max-height:60vh;overflow:auto;padding:12px 14px;border-radius:10px;background:#fff;color:#222;font:15px/1.45 system-ui,sans-serif;white-space:pre-wrap;box-shadow:0 8px 24px rgba(0,0,0,.45)`;
+    // floats over chess.com's panel next to the button, kept on screen: inside their layout it gets clipped or wiped
+    const r = btn.getBoundingClientRect(), wd = Math.min(460, innerWidth - 16), left = Math.max(8, Math.min(r.right - wd, innerWidth - wd - 8));
+    const above = r.top > innerHeight - r.bottom;
+    box.style.cssText = `position:fixed;z-index:99999;left:${left}px;${above ? `bottom:${innerHeight - r.top + 8}px` : `top:${r.bottom + 8}px`};width:${wd}px;max-height:${Math.max(160, (above ? r.top : innerHeight - r.bottom) - 24)}px;overflow:auto;padding:12px 14px;border-radius:10px;background:#fff;color:#222;font:15px/1.45 system-ui,sans-serif;white-space:pre-wrap;box-shadow:0 8px 24px rgba(0,0,0,.45)`;
     document.body.append(box);
   }
   box.dataset.ply = ply;
@@ -73,8 +74,17 @@ async function explain(btn) {
     const { h, san } = await gameMoves(id);
     const r = await fetch(API, { method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ moves: san, ply, verdict: verdict(), white: h.White, black: h.Black, result: h.Result }) });
-    const d = await r.json();
-    if (box.dataset.ply === String(ply)) box.textContent = d.text ? "💡 " + d.text : d.error || "Couldn't explain this one, try again.";
+    if (!r.ok) { const d = await r.json().catch(() => ({})); box.textContent = d.error || "Couldn't explain this one, try again."; }
+    else {
+      const rd = r.body.getReader(), dec = new TextDecoder();
+      let text = "";
+      for (;;) {
+        const { done, value } = await rd.read();
+        if (done || box.dataset.ply !== String(ply)) break;
+        text += dec.decode(value, { stream: true });
+        box.textContent = "💡 " + text.replace(/\*\*/g, "");
+      }
+    }
   } catch (e) { console.warn("[Chess Coach] explain failed", e); box.textContent = "Couldn't reach Chess Coach, try again in a few seconds."; }
   btn.disabled = false;
 }

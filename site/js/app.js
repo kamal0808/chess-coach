@@ -415,6 +415,7 @@ function navUi() {
   $("wtNext").textContent = wi === lesson.steps.length - 1 ? "Done ✓" : "Next →";
 }
 async function wtShow(i, animate) {
+  $("askOut").textContent = ""; askToken++; // an answer belongs to the card it was asked on
   wi = Math.max(0, Math.min(lesson.steps.length - 1, i));
   const s = lesson.steps[wi], my = ++token;
   explored = [];
@@ -545,6 +546,24 @@ async function coachLines(id, g, L) {
   } catch (e) { console.warn("coach lines unavailable, keeping engine text", e); }
 }
 
+// ---------- ask the coach: answered right here by Claude through the Explain Worker, streamed ----------
+async function askHere(q, s, gi, fen, engine) {
+  const out = $("askOut"), my = ++askToken;
+  let n = cur; while (n && n.id > mainLen) n = n.parent; // the game move this board hangs off
+  const ply = Math.max(0, (n ? n.id : 1) - 1), meW = gi.me === "white";
+  const verdict = `${s.name}. ${s.body}${explored.length ? ` | Moves the player tried on the board: ${explored.join(" ")}` : ""} | Stockfish on the board now: ${engine}`.slice(0, 500);
+  out.textContent = "Coach is thinking…";
+  try {
+    const r = await fetch("https://chess-api.topc.social/explain", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ moves: gi.san, ply, verdict, question: q.slice(0, 400), fen, white: meW ? STATE.user : gi.op, black: meW ? gi.op : STATE.user }) });
+    if (!r.ok) throw new Error("explain " + r.status);
+    const rd = r.body.getReader(), dec = new TextDecoder();
+    let text = "";
+    for (;;) { const { done, value } = await rd.read(); if (done || my !== askToken) break; text += dec.decode(value, { stream: true }); out.innerHTML = sqLinks(text); }
+  } catch (e) { console.warn(e); if (my === askToken) out.textContent = "The coach couldn't answer right now. Try again in a moment."; }
+}
+let askToken = 0;
+
 // ---------- ask Claude (runs on the visitor's own Claude account) ----------
 function pvSan(fen, pv) { const c = new Chess(fen), out = []; for (const u of (pv || "").split(" ").filter(Boolean).slice(0, 6)) { try { out.push(c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] || "q" }).san); } catch { break; } } return out.join(" "); }
 const evalTxt = (cp, wtm) => { const w = wtm ? cp : -cp; return Math.abs(w) >= 9000 ? (w > 0 ? "White mates" : "Black mates") : `${w >= 0 ? "+" : ""}${(w / 100).toFixed(1)} (White's view)`; };
@@ -554,6 +573,7 @@ async function askClaude(q) {
   const g = wb.game(), fen = g.fen(), wtm = g.turn() === "w", s = lesson.steps[wi];
   const here = await coachEval(fen, 250000);
   const gi = s.game;
+  if (gi && gi.san && mainLen) return askHere(q, s, gi, fen, `${evalTxt(here.cp, wtm)}, best line ${pvSan(fen, here.pv)}`);
   const prompt = `You're my chess coach. Answer in plain words, at most 150 words. Use square names (e4) and normal move notation.
 
 About me: chess.com player ${STATE.user}, about ${gi ? gi.myR : STATE.stats.ratingLast} rated in ${STATE.tc}.${gi ? ` In this game I was ${gi.me} against ${gi.op} (${gi.opR}), ${gi.res.replace(/^You /, "I ").toLowerCase()}.` : ""}${STATE.game ? `

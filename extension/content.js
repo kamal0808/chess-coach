@@ -52,7 +52,21 @@ function verdict() {
   for (let p = el.parentElement, i = 0; p && i < 4; p = p.parentElement, i++) if (p.textContent.trim().length > head.length + 15) return p.innerText.replace(/\s+/g, " ").trim().slice(0, 400);
   return head;
 }
-const API = "https://chess-api.topc.social/explain";
+const BASE = "https://chess-api.topc.social", API = BASE + "/explain";
+// As soon as a review opens: Stockfish (in the extension) checks every move, then Claude explains them all in one go,
+// so Explain answers instantly. Resolves to { ply: text }, or null when it failed and Explain should ask for one move.
+const coach = {};
+function preload(id) {
+  return (coach[id] ||= (async () => {
+    const { h, san } = await gameMoves(id);
+    const a = await chrome.runtime.sendMessage({ type: "analyse", moves: san });
+    if (!a || a.error) throw new Error(a?.error || "engine didn't answer");
+    const r = await fetch(BASE + "/game", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ id, moves: san, facts: a.facts, white: h.White, black: h.Black, result: h.Result }) });
+    if (!r.ok) throw new Error("game " + r.status);
+    return Object.fromEntries((await r.json()).moves.map((m) => [m.ply, m.text]));
+  })().catch((e) => { console.warn("[Chess Coach] preload failed", e); return null; }));
+}
 const plyNow = () => +(new URLSearchParams(location.search).get("move") || 0);
 // the answer shows in a box under chess.com's buttons, so you never leave the review
 async function explain(btn) {
@@ -68,8 +82,15 @@ async function explain(btn) {
     document.body.append(box);
   }
   box.dataset.ply = ply;
-  box.textContent = "💡 Thinking about this move…";
+  box.textContent = "💡 Your coach is reading the game…";
   btn.disabled = true;
+  const ready = await preload(id);
+  if (ready && ready[ply] != null) {
+    if (box.dataset.ply === String(ply)) box.textContent = "💡 " + ready[ply];
+    btn.disabled = false;
+    return;
+  }
+  box.textContent = "💡 Thinking about this move…";
   try {
     const { h, san } = await gameMoves(id);
     const r = await fetch(API, { method: "POST", headers: { "content-type": "application/json" },
@@ -92,6 +113,7 @@ function addExplain() {
   const box = document.getElementById("cc-answer");
   if (box && (!reviewId() || box.dataset.ply !== String(plyNow()))) box.remove();
   if (!reviewId()) { document.getElementById("cc-explain")?.remove(); return; }
+  preload(reviewId());
   if (document.getElementById("cc-explain")) return;
   const next = [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "Next");
   const b = document.createElement("button");

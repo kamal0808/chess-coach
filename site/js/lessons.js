@@ -206,6 +206,7 @@ export async function gameLesson(g, history, evaluate) {
     body: !worst.length ? "No real mistakes in this one: the engine has nothing to teach you here. Try your own ideas on the board."
       : worst.length === 1 ? "One move decided this game. Let's go to it." : `${worst.length} moves decided this game. Let's go through them.`,
   }];
+  let turn = null; // the costliest move, for the closing verdict
   for (const m of worst) {
     const before = fenAt(g, m.ply - 1), after = new Chess(before); after.move(m.san);
     const rep = after.isGameOver() ? null : await evaluate(after.fen(), DEEP);
@@ -219,16 +220,34 @@ export async function gameLesson(g, history, evaluate) {
       name: `${moveNo(m.ply)}${m.san}${sym}${reply ? ` ${moveNo(m.ply + 1)}${reply}` : ""}`, stat: `${evalWords(m.before)} → ${evalWords(m.after)}`,
       body: reply && reply.includes("x") ? `This lets ${info.op} play ${reply}.` : reply ? `Best answer: ${reply}, and your position gets worse.` : "This throws the game away.",
     });
+    if (!turn || m.drop > turn.m.drop) turn = { m, reply, b0, before };
     if (b0) steps.push({
       start: before, moves: better.join(" "), game: info, alt: true, tone: "good", name: `Better: ${moveNo(m.ply)}${b0}!`,
       stat: `Engine: ${evalWords(mineCp(deep, before, side))}`, body: `${b0} is the move here. Try your own moves on the board, and ask Claude why if it isn't clear.`,
     });
   }
-  const top = topMistake(g);
-  if (worst.length) steps[steps.length - 1].rule = (top && HABITS.find((k) => k.test(g, top)) || HABITS[2]).rule;
   const hs = habitStep(g, history);
   if (hs) steps.push(hs);
+  steps.push(verdictStep(g, info, turn, worst.length));
   return { key: "game", title: "Game review", flip: side === "black", steps };
+}
+
+// Closing card: an honest verdict built only from what the engine found, never praise the game doesn't back up.
+function verdictStep(g, info, turn, count) {
+  const lost = scoreOf(g.result) === 0, won = scoreOf(g.result) === 1;
+  if (!turn) return { start: fenAt(g, g.san.length), moves: "", game: info, name: "The verdict", stat: info.res,
+    body: lost ? "No single move lost this one: the engine found no big mistake. Look at the clock and the plan, not the tactics."
+      : "No move cost you much in this game. Nothing to fix here." };
+  const { m, reply, b0, before } = turn, top = topMistake(g);
+  const others = count - 1;
+  return {
+    start: before, moves: [m.san, reply].filter(Boolean).join(" "), game: info, tone: "bad", link: g.url,
+    name: lost ? "Where you lost it" : won ? "You won, but here it slipped" : "Where the win got away",
+    stat: `${info.res} · move ${Math.ceil(m.ply / 2)}: ${evalWords(m.before)} → ${evalWords(m.after)}`,
+    body: `The game turned on ${moveNo(m.ply)}${m.san}.${reply ? ` It let ${info.op} play ${reply}.` : ""}${b0 ? ` ${b0} was the move.` : ""}` +
+      (others ? ` ${others === 1 ? "One more move" : `${others} more moves`} cost you too, but this is the one to fix first.` : ""),
+    rule: (top && HABITS.find((k) => k.test(g, top)) || HABITS[2]).rule,
+  };
 }
 
 export async function buildLessons(stats, games, evaluate) {

@@ -455,7 +455,7 @@ async function review(user, id) {
   const hs = habitStep(g, await recentHistory(user, g, month));
   if (!hs || lesson !== L) return;
   Object.assign(hs, { from: hs.start, to: hs.start, mv: [], freeze: null });
-  L.steps.push(hs);
+  L.steps.splice(L.steps.length - 1, 0, hs); // the verdict stays last
   navUi();
 }
 const HABIT_GAMES = 30, HABIT_ENGINES = 2; // light: it runs while they use the lesson

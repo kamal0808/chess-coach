@@ -58,6 +58,7 @@ for (const L of lessons) {
     for (const m of st.moves.split(" ").filter(Boolean)) c.move(m); // throws on an illegal move
     assert.ok(st.name && st.body, L.title);
   }
+  if (L.key === "game") assert.ok(/verdict|lost it|slipped|got away/.test(L.steps.at(-1).name), "game review ends on the verdict");
   console.log(`lesson "${L.title}": ${L.steps.length} steps:`, L.steps.map((x) => x.name).join(" | "));
 }
 sf.terminate?.();

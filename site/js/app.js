@@ -296,6 +296,7 @@ function bars(s, ply) {
   };
   top.innerHTML = one(gi.op, gi.opR, !meWhite, false);
   bot.innerHTML = one("You", gi.myR, meWhite, true);
+  material(); // redrawn with the bars, or the line vanishes mid-animation and the board jumps
 }
 const tryMsg = (html, explore) => { $("tryMsg").innerHTML = html; $("tryReset").hidden = !explore; };
 const coachEval = (fen, nodes, stale) => STATE.coach.evaluate(fen, nodes, stale);
@@ -352,7 +353,9 @@ function renderMoves() {
   }
   close();
   $("mvList").innerHTML = h || '<span class="muted">Play a move to start a line.</span>';
-  $("mvList").querySelector(".on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  // scroll only the list itself: scrollIntoView also moves the page, which made the board jump
+  const list = $("mvList"), on = list.querySelector(".on");
+  if (on) { const r = on.getBoundingClientRect(), l = list.getBoundingClientRect(); if (r.top < l.top || r.bottom > l.bottom) list.scrollTop += r.top - l.top - l.height / 2; }
   $("mvPrev").disabled = $("mvFirst").disabled = !cur.parent; $("mvNext").disabled = $("mvLast").disabled = !cur.kids.length;
   graphMark();
 }

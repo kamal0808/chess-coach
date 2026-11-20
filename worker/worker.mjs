@@ -3,9 +3,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Chess } from 'chess.js';
 
-const ORIGIN = 'https://www.chess.com';
-const CORS = { 'Access-Control-Allow-Origin': ORIGIN, 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'content-type' };
-const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, 'content-type': 'application/json' } });
+// chess.com (the extension), Chess Coach's own review, and its local test server
+const ORIGINS = ['https://www.chess.com', 'https://chess.topc.social', 'http://localhost:3010'];
+const json = (body, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 const str = (v, max) => typeof v === 'string' && v.length <= max;
 
 const SYSTEM = `You are a friendly chess coach for club players (roughly 600-1600 rated) reviewing a finished game on chess.com.
@@ -59,11 +59,21 @@ async function wholeGame(b, env, ctx) {
 
 export default {
   async fetch(req, env, ctx) {
-    if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
+    const origin = req.headers.get('origin'), res = await handle(req, env, ctx, origin);
+    res.headers.set('Access-Control-Allow-Origin', ORIGINS.includes(origin) ? origin : ORIGINS[0]);
+    res.headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.headers.set('Access-Control-Allow-Headers', 'content-type');
+    res.headers.set('Vary', 'Origin');
+    return res;
+  },
+};
+
+async function handle(req, env, ctx, origin) {
+    if (req.method === 'OPTIONS') return new Response(null);
     const path = new URL(req.url).pathname;
     if (req.method !== 'POST' || !['/explain', '/game'].includes(path)) return json({ error: 'not found' }, 404);
     // shortcut: the Origin check only stops other websites, not scripts; add a per-IP rate limit if spend shows abuse.
-    if (req.headers.get('origin') !== ORIGIN) return json({ error: 'forbidden' }, 403);
+    if (!ORIGINS.includes(origin)) return json({ error: 'forbidden' }, 403);
     let b;
     try { b = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
     const { moves, ply = 0, verdict = '', white = '', black = '', result = '' } = b || {};
@@ -109,6 +119,5 @@ Explain this move.`;
       }
       await w.close();
     })();
-    return new Response(readable, { headers: { ...CORS, 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
-  },
-};
+    return new Response(readable, { headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' } });
+}

@@ -13,11 +13,21 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap">
 <link rel="stylesheet" href="css/pieces.css">
-<link rel="stylesheet" href="css/app.css?v=5">
+<link rel="stylesheet" href="css/app.css?v=6">
 </head>
 <body>
+<div class="app" id="app">
+<nav class="sb" id="sb" hidden aria-label="Chess Coach">
+  <a href="#home" class="logo"><span aria-hidden="true">♞</span> Chess Coach</a>
+  <a href="#home" class="nav" data-p="home"><span class="ic" aria-hidden="true">⌂</span><span class="lbl">Profile</span></a>
+  <a href="#games" class="nav" data-p="games"><span class="ic" aria-hidden="true">♟</span><span class="lbl">Games</span></a>
+  <a href="#practice" class="nav" data-p="practice"><span class="ic" aria-hidden="true">♞</span><span class="lbl">Practice</span></a>
+  <a href="#lessons" class="nav" data-p="lessons"><span class="ic" aria-hidden="true">✎</span><span class="lbl">Lessons</span></a>
+  <a href="#settings" class="nav" data-p="settings"><span class="ic" aria-hidden="true">⚙</span><span class="lbl">Settings</span></a>
+  <div class="me" id="sbMe"></div>
+</nav>
 <div class="wrap">
-  <header class="brand"><a href="/" class="logo"><span aria-hidden="true">♞</span> Chess Coach</a><span class="muted small">free · open source · by <a href="https://topc.social">TOPC</a></span></header>
+  <header class="brand" id="brand"><a href="/" class="logo"><span aria-hidden="true">♞</span> Chess Coach</a><span class="muted small">free · open source · by <a href="https://topc.social">TOPC</a></span></header>
 
   <section id="s1">
     <div class="land">
@@ -58,10 +68,15 @@
     </div>
   </section>
 
-  <section id="s3" hidden>
+  <section id="sP" hidden><h1 class="ph">Your profile</h1><div id="profile"></div></section>
+  <section id="sG" hidden><h1 class="ph">Your games</h1><div id="games"></div></section>
+  <section id="sX" hidden><h1 class="ph">Practice</h1><div id="practicePage"></div></section>
+  <section id="sS" hidden><h1 class="ph">Settings</h1><div id="settings"></div></section>
+  <section id="s3" hidden><h1 class="ph">Lessons</h1>
     <div id="report"></div>
   </section>
 
+</div>
   <div class="wt" id="wt" hidden role="dialog" aria-modal="true" aria-labelledby="wtName">
     <div class="panel">
       <button class="x" type="button" id="wtClose" aria-label="Close">×</button>
@@ -97,6 +112,6 @@
     </div>
   </div>
 </div>
-<script type="module" src="js/app.js?v=6"></script>
+<script type="module" src="js/app.js?v=7"></script>
 </body>
 </html>

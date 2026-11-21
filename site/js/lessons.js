@@ -169,7 +169,7 @@ export async function openingLesson(games, evaluate) {
 }
 
 // Kinds of costly move we can spot from the game record alone. The next ply is what the opponent actually played.
-const HABITS = [
+export const HABITS = [
   { key: "check", what: "a check that lost the checking piece", rule: "A check is only good if the piece giving it is safe.",
     test: (g, m) => m.san.includes("+") && (g.san[m.ply] || "").includes("x") && g.san[m.ply].replace(/[+#]/g, "").endsWith(m.uci.slice(2, 4)) },
   { key: "clock", what: "a big mistake with under 10% of your clock left", rule: "Low on time? Play the safe, simple move fast. Don't start calculating.",
@@ -177,7 +177,7 @@ const HABITS = [
   { key: "taken", what: "a mistake your opponent punished by taking something straight away", rule: "Before every move, three questions in this order: checks, captures, threats, for you and for them.",
     test: (g, m) => (g.san[m.ply] || "").includes("x") },
 ];
-const BIG = 20;
+export const BIG = 20;
 
 // how much a move cost: a real mistake (10+ points of winning chance) always outranks a slip (1+ pawn given back while winning)
 const pawns = (m) => (Math.abs(m.before) >= MATE - 100 || Math.abs(m.after) >= MATE - 100 ? 0 : (m.before - m.after) / 100);

@@ -389,7 +389,7 @@ async function judge(m, before, after, my) {
   const [, cls, sym, word] = best ? CLS[0] : CLS.find((c) => drop < c[0]);
   let bestSan = ""; try { bestSan = new Chess(before).move({ from: b.best.slice(0, 2), to: b.best.slice(2, 4), promotion: b.best[4] || "q" }).san; } catch {}
   const msg = `<span class="bdg ${cls} inl">${sym}</span> <b>${esc(m.san)}</b> is ${word}.${best || !bestSan ? "" : ` Best was <b>${esc(bestSan)}</b>.`}`;
-  return { cls, sym, word, a, msg };
+  return { cls, sym, word, a, b, bestSan, drop, msg };
 }
 function goTo(n) {
   if (!n) return;
@@ -558,8 +558,14 @@ async function practiceTurn(m, before, j, my) {
     practice.stops++; practice.fen = before;
     const e = practice.seen?.get(posKey(before)), times = e ? ` This position came up in ${e.n} of your games${e.m[m.san] ? `, and you played <b>${esc(m.san)}</b> in ${e.m[m.san]} of them` : ""}.` : "";
     tryMsg(`<span class="bdg ${j.cls} inl">${j.sym}</span> <b>${esc(m.san)}</b> is ${j.word}.${times} The coach explains; then try again.`, true);
-    streamCoach({ moves: [...practice.sans, m.san], ply: practice.sans.length, fen: before, verdict: `${m.san} is ${j.word} (Stockfish)`,
-      question: `In a practice game I played ${m.san} and the engine calls it ${j.word}. Explain briefly why it's bad, and give me a hint toward a better move without naming it.`,
+    // Claude explains Stockfish's own refutation instead of hunting for one: faster, and never "I'm not sure why"
+    const ac = new Chess(before); ac.move(m.san);
+    const deep = await coachEval(ac.fen(), 250000);
+    if (my !== token || !practice) return;
+    const refute = pvSan(ac.fen(), deep?.pv || j.a.pv), better = pvSan(before, j.b.pv);
+    streamCoach({ moves: [...practice.sans, m.san], ply: practice.sans.length, fen: before,
+      verdict: `Stockfish: ${m.san} is ${j.word}, the mover's win chance drops ${Math.round(j.drop)} points. How it gets punished: ${m.san} ${refute}. The better move and line (do NOT name it, hint only): ${better}.`.slice(0, 500),
+      question: `In a practice game I played ${m.san}. Using the punishing line you were given, explain in 2-3 sentences what goes wrong, then give a one-line hint toward the better move without naming it.`,
       white: practice.color === "w" ? STATE.user : "Practice bot", black: practice.color === "w" ? "Practice bot" : STATE.user });
     return;
   }

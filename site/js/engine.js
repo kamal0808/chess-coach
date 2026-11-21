@@ -2,10 +2,12 @@
 import { cpFromUci } from "./core.js";
 
 export class Engine {
-  constructor() {
+  // skill 0–20: Stockfish's own handicap, picks weaker moves on purpose (the practice bot)
+  constructor(skill) {
     this.w = new Worker(new URL("../engine/stockfish-19-lite-single.js", import.meta.url));
     this.q = Promise.resolve();
     this.w.postMessage("uci");
+    if (skill != null) this.w.postMessage("setoption name Skill Level value " + skill);
   }
   // cp is from the side to move; stale() lets a caller drop work that is no longer wanted
   evaluate(fen, nodes = 15000, stale) {

@@ -387,7 +387,7 @@ async function judge(m, before, after, my) {
   const [, cls, sym, word] = best ? CLS[0] : CLS.find((c) => drop < c[0]);
   let bestSan = ""; try { bestSan = new Chess(before).move({ from: b.best.slice(0, 2), to: b.best.slice(2, 4), promotion: b.best[4] || "q" }).san; } catch {}
   const msg = `<span class="bdg ${cls} inl">${sym}</span> <b>${esc(m.san)}</b> is ${word}.${best || !bestSan ? "" : ` Best was <b>${esc(bestSan)}</b>.`}`;
-  return { cls, sym, a, msg };
+  return { cls, sym, word, a, msg };
 }
 function goTo(n) {
   if (!n) return;
@@ -491,6 +491,41 @@ function material() {
   }
 }
 
+// ---------- practice: replay a position you got wrong against a weak bot; a bad move is taken back and the coach explains ----------
+let practice = null, bot = null;
+function startPractice() {
+  const s = lesson.steps[wi];
+  practice = { good: 0, card: wi };
+  bot ||= new Engine(2);
+  ++token; explored = []; $("askOut").textContent = "";
+  wb.set(s.from, lesson.flip); wb.mark([], ""); wb.setBusy(false);
+  buildTree({ ...s, mv: [] }); material(); evalHere(token);
+  tryMsg(`<b>Practice:</b> you played <b>${esc(s.mv[0]?.san || "")}</b> here. Find a better move; the bot (about your level) plays back.`, true);
+}
+async function practiceTurn(m, before, j, my) {
+  const s = lesson.steps[practice.card];
+  if (["inacc", "mist", "blun"].includes(j.cls)) {
+    await new Promise((r) => setTimeout(r, 700));
+    if (my !== token) return;
+    cur = cur.parent; renderMoves();
+    wb.set(before, lesson.flip); wb.mark([m.from, m.to], "bad"); wb.setBusy(false);
+    practice.good = 0;
+    tryMsg(`<span class="bdg ${j.cls} inl">${j.sym}</span> <b>${esc(m.san)}</b> is ${j.word}. The coach explains; then try again.`, true);
+    askHere(`In practice I played ${m.san} here and the engine calls it ${j.word}. Explain briefly why it's bad, and give me a hint toward a better move without naming it.`, s, s.game, before, j.msg.replace(/<[^>]+>/g, ""));
+    return;
+  }
+  practice.good++;
+  tryMsg(`<span class="bdg ${j.cls} inl">${j.sym}</span> <b>${esc(m.san)}</b> is ${j.word}. ${practice.good} good move${practice.good > 1 ? "s" : ""} in a row. The bot is thinking…`, true);
+  const g = wb.game(), r = await bot.evaluate(g.fen(), 4000);
+  if (my !== token || !practice) return;
+  const reply = r && g.moves({ verbose: true }).find((x) => x.from + x.to === (r.best || "").slice(0, 4) && (!x.promotion || x.promotion === (r.best[4] || "q")));
+  if (reply) { await wb.play(reply, 320); if (my !== token) return; grow(reply); wb.mark([reply.from, reply.to], "last"); material(); }
+  if (wb.game().isGameOver()) tryMsg(wb.game().isCheckmate() ? "Checkmate. Practice over." : "Draw. Practice over.", true);
+  else tryMsg(`Bot played <b>${esc(reply?.san || "")}</b>. Your move. (${practice.good} good in a row)`, true);
+  wb.setBusy(false);
+  evalHere(my);
+}
+
 function navUi() {
   $("wtStep").textContent = `${lesson.title} · step ${wi + 1} of ${lesson.steps.length}`;
   $("wtDots").innerHTML = lesson.steps.length > 24 ? "" : lesson.steps.map((x, j) => `<button type="button" aria-label="Step ${j + 1}" class="${j === wi ? "on" : x.tone || ""}" data-j="${j}"></button>`).join("");
@@ -506,6 +541,8 @@ async function wtShow(i, animate) {
   $("wtIcon").innerHTML = s.badge ? `<span class="bdg ${s.badge[0]} inl">${s.badge[1]}</span>` : "";
   $("wtEval").textContent = s.ev || ""; $("wtEval").hidden = !s.ev;
   $("wtBest").hidden = !s.best;
+  practice = null;
+  $("wtPractice").hidden = !(s.mine && s.badge && ["inacc", "mist", "blun"].includes(s.badge[0]));
   $("wtBody").innerHTML = sqLinks(s.body);
   $("wtExtra").innerHTML = (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
     (s.link ? `<a class="btn ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">See your game ↗</a>` : "") +
@@ -546,6 +583,7 @@ wb.onMove(async (m, fromDrag) => {
   tryMsg(`<b>${esc(m.san)}</b> · Stockfish is thinking…`, true);
   const j = await judge(m, before, g.fen(), my);
   if (!j) return;
+  if (practice) return practiceTurn(m, before, j, my);
   const { cls, sym, a } = j;
   wb.badge(m.to, cls, sym);
   evalBar($("evb"), turnW ? -a.cp : a.cp, wb.flip());
@@ -705,6 +743,7 @@ $("mvNext").addEventListener("click", () => nav(cur.kids[0]));
 $("mvFirst").addEventListener("click", () => nav(nodes[0]));
 $("mvLast").addEventListener("click", () => { let n = cur; while (n.kids.length) n = n.kids[0]; nav(n); });
 $("wtBest").addEventListener("click", showBest);
+$("wtPractice").addEventListener("click", startPractice);
 $("tryReset").addEventListener("click", () => wtShow(wi, false));
 document.addEventListener("keydown", (ev) => {
   if (wtEl.hidden || ev.target.closest("input")) return;

@@ -227,7 +227,7 @@ export async function gameLesson(g, history, evaluate) {
       winBefore: Math.round(winPct(cb)), winAfter: Math.round(winPct(ca)), best: bestSan, bestLine: bestSan,
       reply: !c.isGameOver() && g.bests[i + 1] ? uciLine(c.fen(), g.bests[i + 1], 1)[0] || "" : "" });
     steps.push({
-      start: before, moves: m.san, game: info, tone: bad ? "bad" : isBest ? "good" : "", badge: [cls, sym], ev: evTxt(white(g.evals[i + 1])),
+      start: before, moves: m.san, game: info, tone: bad ? "bad" : isBest ? "good" : "", badge: [cls, sym], mine: me, ev: evTxt(white(g.evals[i + 1])),
       best: isBest || !g.bests[i] ? null : g.bests[i], bestSan,
       name: `${moveNo(i + 1)}${m.san} is ${word}`,
       stat: `${me ? "Your" : `${info.op}'s`} win chance: ${winTxt(cb)} → ${winTxt(ca)}`,

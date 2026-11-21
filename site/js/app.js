@@ -52,7 +52,11 @@ async function fetchGames(user, range, onProgress) {
 
 // ---------- run ----------
 let STATE = null;
+// the player you analysed is remembered in this browser, so coming back opens your report straight away
+const ME = "cc-me";
+const remembered = () => { try { return JSON.parse(localStorage.getItem(ME)); } catch { return null; } };
 async function run(user, range) {
+  try { localStorage.setItem(ME, JSON.stringify({ u: user, r: range })); } catch {}
   show("s2");
   $("anUser").textContent = `${user} · ${{ "3m": "last 3 months", "500": "last 500 games", all: "all games" }[range]}`;
   $("anTitle").textContent = "Downloading your games…";
@@ -259,7 +263,7 @@ function renderReport() {
   if (lessonOf("opening")) plan.push([`Fix one line: ${lessonOf("opening").title.replace(/^Your /, "")}`, "The move you keep playing there, and the better one.", "opening"]);
   if (s.tilt.after2 != null && s.tilt.after2 < (s.tilt.afterWin ?? 100) - 2) plan.push(["Two losses in a row? Take a break", `You score ${Math.round(s.tilt.after2)}% in the next game.`]);
   $("plan").innerHTML = `<div class="step"><span class="ic" aria-hidden="true">♞</span><span class="tx"><b>Play a practice game</b><span class="muted small">A weak bot replays the lines your opponents used against you. Any mistake, and the coach stops you to fix it.</span></span><span class="go"><button class="btn sm" type="button" data-practice>Play</button></span></div>` + plan.map(([t, d2, wt, link], i) => `<div class="step"><span class="ic" aria-hidden="true">${i + 1}</span><span class="tx"><b>${esc(t)}</b><span class="muted small">${esc(d2)}</span></span><span class="go">${wt ? `<button class="btn sm" type="button" data-wt="${wt}">Start lesson</button>` : ""}${link ? `<a class="btn sm ghost" href="${link[1]}" target="_blank" rel="noopener">${link[0]} ↗</a>` : ""}</span></div>`).join("");
-  $("again").onclick = () => { history.replaceState(null, "", location.pathname); show("s1"); };
+  $("again").onclick = () => { try { localStorage.removeItem(ME); } catch {} history.replaceState(null, "", location.pathname); $("user").value = ""; show("s1"); };
 }
 
 // ---------- lessons ----------
@@ -818,5 +822,7 @@ $("enter").addEventListener("submit", (ev) => {
 });
 staticBoard($("heroBoard"), "2k1r1r1/ppp2p1p/2q1p2B/4Q3/2P5/1NP2PPb/PP6/R2R2K1 b - - 0 22", { flip: true, hl: ["g8", "g3"], bad: true, arrow: ["c6", "f3"] });
 const qs = new URLSearchParams(location.search);
+const me = !qs.get("u") && !qs.get("game") && remembered();
+if (me && me.u) { $("user").value = me.u; if (["3m", "500", "all"].includes(me.r)) document.querySelector(`input[name=range][value="${me.r}"]`).checked = true; run(me.u, me.r || "3m"); }
 if (qs.get("u") && !qs.get("game")) { $("user").value = qs.get("u"); const r = qs.get("r"); if (["3m", "500", "all"].includes(r)) document.querySelector(`input[name=range][value="${r}"]`).checked = true; run(qs.get("u"), r || "3m"); }
 if (qs.get("game") && qs.get("u")) review(qs.get("u"), qs.get("game"));

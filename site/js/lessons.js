@@ -209,7 +209,7 @@ const evTxt = (cp) => (Math.abs(cp) >= MATE - 100 ? `${cp > 0 ? "" : "-"}M${Math
 export async function gameLesson(g, history, evaluate) {
   const info = gameInfo(g), side = g.color, myTurn = side === "white" ? "w" : "b";
   const steps = [{ start: g.start || START, moves: "", game: info, name: `Your game vs ${info.op}`, stat: info.res }];
-  const labels = [], plyStep = [0], count = {}, facts = [], white = (cp) => (side === "white" ? cp : -cp);
+  const labels = [], plyStep = [0], count = {}, facts = [], tally = { me: {}, op: {} }, acc = { me: [], op: [] }, white = (cp) => (side === "white" ? cp : -cp);
   const c = new Chess(g.start || undefined);
   for (let i = 0; i < g.san.length; i++) {
     const before = c.fen(), m = c.move(g.san[i]), uci = m.from + m.to + (m.promotion || "");
@@ -219,6 +219,9 @@ export async function gameLesson(g, history, evaluate) {
     const [, cls, sym, word] = isBest ? CLS[0] : CLS.find((k) => drop < k[0]);
     labels[i + 1] = [cls, sym];
     if (me) count[cls] = (count[cls] || 0) + 1;
+    const who = me ? "me" : "op";
+    tally[who][cls] = (tally[who][cls] || 0) + 1;
+    acc[who].push(Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * Math.max(0, drop)) - 3.1669))); // lichess-style move accuracy
     const bad = !isBest && drop >= 5, bestSan = isBest ? "" : uciLine(before, g.bests[i], 1)[0] || "";
     const reply = bad && !c.isGameOver() ? uciLine(c.fen(), g.bests[i + 1], 1)[0] : null;
     plyStep[i + 1] = steps.length;
@@ -242,6 +245,9 @@ export async function gameLesson(g, history, evaluate) {
   }
   const n = (k, one, many) => (count[k] ? `${count[k]} ${count[k] > 1 ? many : one}` : "");
   const errs = [n("blun", "blunder", "blunders"), n("mist", "mistake", "mistakes"), n("inacc", "inaccuracy", "inaccuracies")].filter(Boolean);
+  // the summary chess.com opens a review with: accuracy and how many of each label, for both players
+  const avg = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+  steps[0].summary = { op: info.op, me: "You", accOp: avg(acc.op), accMe: avg(acc.me), tally };
   steps[0].body = `${errs.length ? `You made ${errs.join(", ")}.` : "No inaccuracies or worse from you."} Press Next to go through the game move by move.`;
   const hs = habitStep(g, history);
   if (hs) steps.push(hs);

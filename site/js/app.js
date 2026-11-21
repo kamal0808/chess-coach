@@ -180,7 +180,7 @@ async function renderApp() {
   ];
   const spark = (v, color) => { const pts = v.map((x, i) => [i, x]).filter(([, x]) => x != null); if (pts.length < 2) return ""; const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1])) || 1;
     return `<svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="var(${color})" stroke-width="1.5" points="${pts.map(([i, x]) => `${(i * 100) / 7},${28 - ((x - lo) * 26) / (hi - lo || 1)}`).join(" ")}"/></svg>`; };
-  const trend = (t) => { const v = t.v.filter((x) => x != null); if (!v.length) return ""; const first = v[0], last = v[v.length - 1], up = last > first;
+  const trend = (t) => { const v = t.v.filter((x) => x != null); if (!v.length) return ""; const same = t.fmt(v[0]) === t.fmt(v[v.length - 1]), first = v[0], last = same ? v[0] : v[v.length - 1], up = last > first;
     const good = t.neutral ? null : up !== t.lowGood, cls = good == null ? "" : first === last ? "" : good ? "better" : "worse";
     return `<div class="card trend"><div class="row"><span class="eyebrow">${t.name}</span><b class="${cls}">${t.fmt(last)} ${first === last ? "" : up ? "▲" : "▼"}</b></div>${spark(t.v, cls === "worse" ? "--flag" : cls === "better" ? "--go" : "--fg")}<span class="muted small">from ${t.fmt(first)} 8 weeks ago</span></div>`; };
   // habits: per game, the last 30 days vs the 30 before
@@ -233,10 +233,16 @@ async function renderApp() {
     <label class="in" for="setUser"><span>chess.com/member/</span><input id="setUser" value="${esc(user)}" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
     <div class="seg" role="radiogroup" aria-label="Which games">${[["3m", "Last 3 months"], ["500", "Last 500"], ["all", "All time"]].map(([v, t]) => `<label><input type="radio" name="setRange" value="${v}"${STATE.range === v ? " checked" : ""}>${t}</label>`).join("")}</div>
     <span class="muted small">Time control: ${tc} (the one you play most).</span>
+    <span class="eyebrow">Board colours</span>
+    <div class="seg" role="radiogroup" aria-label="Board colours">${[["green", "Green"], ["brown", "Brown wood"]].map(([v, t]) => `<label><input type="radio" name="setBoard" value="${v}"${(document.documentElement.dataset.board || "green") === v ? " checked" : ""}>${t}</label>`).join("")}</div>
     <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" type="submit">Check my games again</button><button class="btn ghost" type="button" id="forget">Use another account</button></div></form>`;
   $("setForm").onsubmit = (e) => { e.preventDefault(); const u = $("setUser").value.trim(); if (u) run(u, document.querySelector("input[name=setRange]:checked").value); };
   $("forget").onclick = forget;
+  for (const r of document.querySelectorAll("input[name=setBoard]")) r.onchange = () => setBoard(r.value);
 }
+// board colours: green like chess.com's default, or brown wood; remembered in this browser
+function setBoard(v) { document.documentElement.dataset.board = v; try { localStorage.setItem("cc-board", v); } catch {} }
+try { const b = localStorage.getItem("cc-board"); if (b) document.documentElement.dataset.board = b; } catch {}
 
 // ---------- the move-by-move review of any game from the Games page ----------
 async function openReview(url, btn) {
@@ -730,6 +736,12 @@ function savePractice(result) {
 }
 const leavePractice = () => { if (practice) savePractice("Stopped"); };
 
+function summaryHtml(m) {
+  const rows = CLS.map(([, cls, sym, word]) => `<tr><td class="n">${m.tally.op[cls] || 0}</td><td style="text-align:center"><span class="bdg ${cls} inl">${sym}</span> ${word.replace(/^(an?|the) /, "")}</td><td class="n">${m.tally.me[cls] || 0}</td></tr>`).join("");
+  return `<table class="tbl sum"><tr><th class="n">${esc(m.op)}</th><th></th><th class="n">${esc(m.me)}</th></tr>
+    <tr><td class="n"><b>${m.accOp.toFixed(1)}</b></td><td style="text-align:center" class="eyebrow">Accuracy</td><td class="n"><b>${m.accMe.toFixed(1)}</b></td></tr>${rows}</table>`;
+}
+
 function navUi() {
   $("wtStep").textContent = `${lesson.title} · step ${wi + 1} of ${lesson.steps.length}`;
   $("wtDots").innerHTML = lesson.steps.length > 24 ? "" : lesson.steps.map((x, j) => `<button type="button" aria-label="Step ${j + 1}" class="${j === wi ? "on" : x.tone || ""}" data-j="${j}"></button>`).join("");
@@ -748,7 +760,7 @@ async function wtShow(i, animate) {
   practice = null;
   $("wtPlay").hidden = lesson.key !== "game" || wi !== lesson.steps.length - 1;
   $("wtBody").innerHTML = sqLinks(s.body);
-  $("wtExtra").innerHTML = (s.html || "") + (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
+  $("wtExtra").innerHTML = (s.summary ? summaryHtml(s.summary) : "") + (s.html || "") + (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
     (s.link ? `<a class="btn ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">See your game ↗</a>` : "") +
     (s.rule ? `<div class="rule"><b>Remember:</b> ${sqLinks(s.rule)}</div>` : "");
   navUi();

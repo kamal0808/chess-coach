@@ -314,3 +314,6 @@ html, body { margin: 0; }
   .app:has(.sb:not([hidden])) .wt .panel { grid-template-columns: 1fr; padding: 12px; }
   .app:has(.sb:not([hidden])) .wt .wtb { max-width: none; }
 }
+/* brown wood board, for players used to it */
+:root[data-board="brown"] { --sq-l: #f0d9b5; --sq-d: #b58863; }
+.wt .bubble .tbl.sum td, .wt .bubble .tbl.sum th { border-top: 1px solid #eee; padding: 4px 8px; color: #222; }

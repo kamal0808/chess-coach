@@ -8,6 +8,8 @@ const $ = (id) => document.getElementById(id);
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const fmtClock = (t) => { if (t == null) return "–"; t = Math.max(0, t); return t < 20 ? `0:${t.toFixed(1).padStart(4, "0")}` : `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, "0")}`; };
 const ANALYSIS_VERSION = 2; // 2: per-position evals for the move-by-move review
+// the report and the practice bot only need what version 1 saved, so they reuse those analyses instead of redoing every game
+const cacheGetAny = async (user, url) => (await cacheGet(`${ANALYSIS_VERSION}:${user.toLowerCase()}:${url}`)) || cacheGet(`1:${user.toLowerCase()}:${url}`);
 
 // ---------- screens ----------
 function show(id) { for (const s of ["s1", "s2", "s3"]) $(s).hidden = s !== id; window.scrollTo(0, 0); }
@@ -71,7 +73,7 @@ async function run(user, range) {
   $("anTitle").textContent = `Checking ${n_(games.length)} ${tc} games…`;
 
   const done = [], todo = [];
-  for (const g of games) { const c = await cacheGet(`${ANALYSIS_VERSION}:${user.toLowerCase()}:${g.url}`); c ? done.push(c) : todo.push(g); }
+  for (const g of games) { const c = await cacheGetAny(user, g.url); c ? done.push(c) : todo.push(g); }
   const engines = Array.from({ length: Math.min(poolSize(), Math.max(1, todo.length)) }, () => new Engine());
   const t0 = performance.now(); let next = 0, shown = 0;
   const tick = () => {
@@ -674,6 +676,7 @@ async function review(user, id) {
 const HABIT_GAMES = 30, HABIT_ENGINES = 2; // light: it runs while they use the lesson
 async function recentHistory(user, g, month) {
   const pre = `${ANALYSIS_VERSION}:${user.toLowerCase()}:`, have = await cacheAll(pre), got = new Set(have.map((h) => h.url));
+  for (const h of await cacheAll(`1:${user.toLowerCase()}:`)) if (!got.has(h.url)) { have.push(h); got.add(h.url); }
   const todo = month.filter((x) => x.rules === "chess" && x.pgn && x.time_class === g.tc && x.url !== g.url)
     .sort((a, b) => b.end_time - a.end_time).slice(0, HABIT_GAMES).filter((x) => !got.has(x.url));
   const engines = Array.from({ length: Math.min(HABIT_ENGINES, todo.length) }, () => new Engine());

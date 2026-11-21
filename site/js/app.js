@@ -506,9 +506,24 @@ function startPracticeGame() {
     body: "The bot plays the lines your opponents used against you. Make a mistake, even a small one, and the coach stops you to fix it." }] };
   prep(lesson); wtEl.hidden = false; wtShow(0, false);
   $("wtNext").textContent = "Done ✓"; $("wtPlay").hidden = true;
-  practice = { color, sans: [], good: 0, stops: 0 };
+  practice = { color, sans: [], good: 0, stops: 0, fen: new Chess().fen(), seen: null };
   bot ||= new Engine(2);
+  indexPast(practice);
   if (color === "b") botMove(token);
+}
+// every position from your past games where it was your move: how often it came up and what you played there
+const posKey = (fen) => fen.split(" ").slice(0, 4).join(" ");
+async function indexPast(p) {
+  const mine = p.color === "w" ? "white" : "black", idx = new Map(), games = pastGames().filter((g) => g.color === mine);
+  for (let i = 0; i < games.length; i++) {
+    const c = new Chess();
+    for (const san of games[i].san) {
+      if (c.turn() === p.color) { const k = posKey(c.fen()), e = idx.get(k) || { n: 0, m: {} }; e.n++; e.m[san] = (e.m[san] || 0) + 1; idx.set(k, e); }
+      try { c.move(san); } catch { break; }
+    }
+    if (i % 40 === 39) await new Promise((r) => setTimeout(r)); // stay responsive while it reads hundreds of games
+  }
+  p.seen = idx;
 }
 async function botMove(my) {
   const g = wb.game(), seq = practice.sans, mine = practice.color === "w" ? "white" : "black", cands = [];
@@ -529,7 +544,7 @@ async function botMove(my) {
   wb.setBusy(true);
   await wb.play(m, 320);
   if (my !== token || !practice) return;
-  grow(m); practice.sans.push(m.san); wb.mark([m.from, m.to], "last"); material(); wb.setBusy(false);
+  grow(m); practice.sans.push(m.san); practice.fen = wb.game().fen(); wb.mark([m.from, m.to], "last"); material(); wb.setBusy(false);
   if (wb.game().isGameOver()) return practiceOver();
   tryMsg(`Bot played <b>${esc(m.san)}</b>${fromPast ? `, like your opponents did (${cands.length} of your games went this way)` : ""}. Your move.`, true);
   evalHere(my);
@@ -540,14 +555,15 @@ async function practiceTurn(m, before, j, my) {
     if (my !== token || !practice) return;
     cur = cur.parent; renderMoves();
     wb.set(before, lesson.flip); wb.mark([m.from, m.to], "bad"); material(); wb.setBusy(false);
-    practice.stops++;
-    tryMsg(`<span class="bdg ${j.cls} inl">${j.sym}</span> <b>${esc(m.san)}</b> is ${j.word}. The coach explains; then try again.`, true);
+    practice.stops++; practice.fen = before;
+    const e = practice.seen?.get(posKey(before)), times = e ? ` This position came up in ${e.n} of your games${e.m[m.san] ? `, and you played <b>${esc(m.san)}</b> in ${e.m[m.san]} of them` : ""}.` : "";
+    tryMsg(`<span class="bdg ${j.cls} inl">${j.sym}</span> <b>${esc(m.san)}</b> is ${j.word}.${times} The coach explains; then try again.`, true);
     streamCoach({ moves: [...practice.sans, m.san], ply: practice.sans.length, fen: before, verdict: `${m.san} is ${j.word} (Stockfish)`,
       question: `In a practice game I played ${m.san} and the engine calls it ${j.word}. Explain briefly why it's bad, and give me a hint toward a better move without naming it.`,
       white: practice.color === "w" ? STATE.user : "Practice bot", black: practice.color === "w" ? "Practice bot" : STATE.user });
     return;
   }
-  practice.good++; practice.sans.push(m.san);
+  practice.good++; practice.sans.push(m.san); practice.fen = wb.game().fen();
   if (wb.game().isGameOver()) return practiceOver();
   tryMsg(`<span class="bdg ${j.cls} inl">${j.sym}</span> <b>${esc(m.san)}</b> is ${j.word}. The bot is thinking…`, true);
   await new Promise((r) => setTimeout(r, 400));
@@ -783,7 +799,14 @@ $("mvFirst").addEventListener("click", () => nav(nodes[0]));
 $("mvLast").addEventListener("click", () => { let n = cur; while (n.kids.length) n = n.kids[0]; nav(n); });
 $("wtBest").addEventListener("click", showBest);
 $("wtPlay").addEventListener("click", startPracticeGame);
-$("tryReset").addEventListener("click", () => wtShow(wi, false));
+// in a practice game, "Back" returns to where you are in that game, not to its first move
+$("tryReset").addEventListener("click", () => {
+  if (!practice) return wtShow(wi, false);
+  ++token;
+  wb.set(practice.fen, lesson.flip); wb.mark([], ""); wb.setBusy(false);
+  cur = [...nodes].reverse().find((n) => n.fen === practice.fen) || cur; renderMoves();
+  tryMsg("Back in your practice game. Your move.", true);
+});
 document.addEventListener("keydown", (ev) => {
   if (wtEl.hidden || ev.target.closest("input")) return;
   if (ev.key === "ArrowRight") nav(cur.kids[0]);

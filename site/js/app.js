@@ -209,7 +209,7 @@ async function renderApp() {
   const errs = (g) => { const c = [g.moves.filter((m) => m.drop >= 20).length, g.moves.filter((m) => m.drop >= 10 && m.drop < 20).length, g.moves.filter((m) => m.drop >= 5 && m.drop < 10).length];
     return [c[0] && `${c[0]} blunder${c[0] > 1 ? "s" : ""}`, c[1] && `${c[1]} mistake${c[1] > 1 ? "s" : ""}`, c[2] && `${c[2]} inacc.`].filter(Boolean).join(" · ") || "clean"; };
   $("games").innerHTML = `<div class="card"><table class="tbl"><tr><th>Date</th><th>Opponent</th><th>You</th><th>Result</th><th>Your mistakes</th><th></th></tr>${recent.map((g) => { const i = gameInfo(g), sc = scoreOf(g.result);
-    return `<tr><td>${dShort(g.end * 1000)}</td><td>${esc(g.op)} <span class="muted">(${g.opRating})</span></td><td>${g.color === "white" ? "White" : "Black"}</td><td class="${sc === 1 ? "better" : sc === 0 ? "worse" : ""}">${esc(i.res.replace(/^You /, ""))}</td><td class="small">${errs(g)}</td><td><button class="btn sm" type="button" data-review="${esc(g.url)}">Review</button></td></tr>`; }).join("")}</table></div>
+    return `<tr><td>${dShort(g.end * 1000)}</td><td>${esc(g.op)} <span class="muted">(${g.opRating})</span></td><td>${g.color === "white" ? "White" : "Black"}</td><td class="${sc === 1 ? "better" : sc === 0 ? "worse" : ""}">${esc(i.res.replace(/^You (\w)/, (_, c) => c.toUpperCase()))}</td><td class="small">${errs(g)}</td><td><button class="btn sm" type="button" data-review="${esc(g.url)}">Review</button></td></tr>`; }).join("")}</table></div>
     <p class="muted small">Your ${recent.length} most recent ${tc} games. Review opens the move-by-move review with the coach.</p>`;
 
   // practice

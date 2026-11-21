@@ -1,6 +1,6 @@
 import { Chess } from "../vendor/chess.js";
 import { analyseGame, buildStats, winPct, openingName, scoreOf } from "./core.js";
-import { buildLessons, gameLesson, habitStep, moveNo, evalWords, CLS } from "./lessons.js";
+import { buildLessons, gameLesson, habitStep, moveNo, evalWords, CLS, HABITS, BIG, gameInfo } from "./lessons.js";
 import { Engine, poolSize } from "./engine.js";
 import { staticBoard, LessonBoard, evalBar } from "./board.js";
 
@@ -12,7 +12,7 @@ const ANALYSIS_VERSION = 2; // 2: per-position evals for the move-by-move review
 const cacheGetAny = async (user, url) => (await cacheGet(`${ANALYSIS_VERSION}:${user.toLowerCase()}:${url}`)) || cacheGet(`1:${user.toLowerCase()}:${url}`);
 
 // ---------- screens ----------
-function show(id) { for (const s of ["s1", "s2", "s3"]) $(s).hidden = s !== id; window.scrollTo(0, 0); }
+function show(id) { for (const s of ["s1", "s2", "sP", "sG", "sX", "s3", "sS"]) $(s).hidden = s !== id; window.scrollTo(0, 0); }
 
 // ---------- cache (IndexedDB, per game) ----------
 const db = new Promise((res) => {
@@ -113,10 +113,17 @@ async function run(user, range) {
     cachePut(lkey, { sig, lessons });
   }
   STATE = { user, range, tc, skipped, stats, lessons, games: done, coach };
+  STATE.raw = new Map(games.map((g) => [g.url, g]));
   renderReport();
-  show("s3");
-  history.replaceState(null, "", `?u=${encodeURIComponent(user)}&r=${range}`);
+  history.replaceState(null, "", `?u=${encodeURIComponent(user)}&r=${range}${location.hash}`);
+  await renderApp();
+  $("sb").hidden = false;
+  route();
+  // a link to one game (from the extension) opens its review inside the app once the app is ready
+  const want = pendingGame && [...STATE.raw.keys()].find((u) => u.endsWith("/" + pendingGame));
+  if (pendingGame) { pendingGame = null; if (want) openReview(want, { textContent: "", disabled: false }); }
 }
+let pendingGame = null;
 const n_ = (n) => n.toLocaleString("en-IN");
 
 function spotted(s) {
@@ -126,6 +133,135 @@ function spotted(s) {
   if (s.openings[0]) items.push([`${Math.round(s.openings[0].score)}%`, `with the ${s.openings[0].name} as ${s.openings[0].color}`]);
   if (s.clk20Wins && s.clk20Flagged) items.push([`${Math.round(s.clk20Flagged - s.clk20Wins)}s`, "on your clock by move 20 in games you flag, vs games you win"]);
   $("found").innerHTML = items.map(([b, t]) => `<div class="f"><b>${esc(b)}</b><span>${esc(t)}</span></div>`).join("");
+}
+
+// ---------- the app: sidebar pages once we know who you are ----------
+const PAGES = { home: "sP", games: "sG", practice: "sX", lessons: "s3", settings: "sS" };
+function route() {
+  if (!STATE?.games) return;
+  const p = PAGES[location.hash.slice(1)] ? location.hash.slice(1) : "home";
+  if (!wtEl.hidden) { leavePractice(); wtEl.hidden = true; } // switching pages closes the board
+  show(PAGES[p]);
+  for (const a of document.querySelectorAll(".sb a.nav")) a.classList.toggle("on", a.dataset.p === p);
+  if (p === "practice") openPracticeBoard();
+}
+// Practice opens on the board straight away, like chess.com's Play page: colours and your record in the right panel
+function openPracticeBoard() {
+  lesson = { key: "practice-idle", title: "Practice", flip: false, steps: [{ start: new Chess().fen(), moves: "", name: "Practice vs the bot",
+    body: "Pick a colour. The bot replays the lines your opponents used against you; any inaccuracy or worse, and the coach stops you to fix it.",
+    html: `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px"><button class="btn" type="button" data-practice="w">Play as White</button><button class="btn ghost" type="button" data-practice="b">Play as Black</button></div><span class="eyebrow" style="margin-top:12px;display:block">Your practice record</span>${STATE.practiceHtml || ""}` }] };
+  prep(lesson); wtEl.hidden = false; wtShow(0, false); $("wtNext").textContent = "Close";
+}
+addEventListener("hashchange", route);
+function forget() {
+  try { localStorage.removeItem(ME); } catch {}
+  $("sb").hidden = true; history.replaceState(null, "", location.pathname); $("user").value = ""; show("s1");
+}
+const accOf = (ms) => (ms.length ? ms.reduce((a, m) => a + Math.max(0, Math.min(100, 103.1668 * Math.exp(-0.04354 * Math.max(0, m.drop)) - 3.1669)), 0) / ms.length : null);
+const DAY = 86400;
+async function renderApp() {
+  const { user, tc, stats: s, games } = STATE;
+  const G = [...games].filter((g) => g.moves.length >= 5).sort((a, b) => a.end - b.end), to = s.to;
+  const runs = (await cacheAll(`practice:${user.toLowerCase()}:`)).sort((a, b) => b.date - a.date);
+  const dShort = (t) => new Date(t).toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+  $("sbMe").innerHTML = `<div class="av">${esc(user[0].toUpperCase())}</div><div><b>${esc(user)}</b><div class="muted small">${tc} · ${s.ratingLast}</div></div>`;
+
+  // player card
+  const before = G.filter((g) => g.end < to - 30 * DAY).pop(), change = before ? s.ratingLast - before.myRating : null;
+  const ph = Object.entries(s.phase).filter(([, v]) => v != null).sort((a, b) => a[1] - b[1]);
+  const ops = s.openings.filter((o) => o.n >= 5), worst = ops[0], best = ops[ops.length - 1];
+  const leak = s.leak === "clock" ? "Losing won games on the clock" : "Giving back winning positions";
+  const opTxt = (o) => (o ? `${esc(o.name)} (${o.color}) · ${Math.round(o.score)}%` : "not enough games");
+  // trends: 8 weeks back from your last game
+  const wk = Array.from({ length: 8 }, (_, i) => G.filter((g) => g.end > to - (8 - i) * 7 * DAY && g.end <= to - (7 - i) * 7 * DAY));
+  const mine = (gs) => gs.flatMap((g) => g.moves);
+  const taken = HABITS.find((h) => h.key === "taken");
+  const series = [
+    { name: "Blunders per game", v: wk.map((gs) => (gs.length ? mine(gs).filter((m) => m.drop >= BIG).length / gs.length : null)), fmt: (x) => x.toFixed(1), lowGood: true },
+    { name: "Accuracy", v: wk.map((gs) => accOf(mine(gs))), fmt: (x) => `${Math.round(x)}%`, lowGood: false },
+    { name: "Rating", v: wk.map((gs) => (gs.length ? gs[gs.length - 1].myRating : null)), fmt: (x) => String(x), lowGood: false, neutral: true },
+    { name: "Pieces left hanging per game", v: wk.map((gs) => (gs.length ? gs.reduce((a, g) => a + g.moves.filter((m) => m.drop >= BIG && taken.test(g, m)).length, 0) / gs.length : null)), fmt: (x) => x.toFixed(1), lowGood: true },
+  ];
+  const spark = (v, color) => { const pts = v.map((x, i) => [i, x]).filter(([, x]) => x != null); if (pts.length < 2) return ""; const lo = Math.min(...pts.map((p) => p[1])), hi = Math.max(...pts.map((p) => p[1])) || 1;
+    return `<svg viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polyline fill="none" stroke="var(${color})" stroke-width="1.5" points="${pts.map(([i, x]) => `${(i * 100) / 7},${28 - ((x - lo) * 26) / (hi - lo || 1)}`).join(" ")}"/></svg>`; };
+  const trend = (t) => { const v = t.v.filter((x) => x != null); if (!v.length) return ""; const same = t.fmt(v[0]) === t.fmt(v[v.length - 1]), first = v[0], last = same ? v[0] : v[v.length - 1], up = last > first;
+    const good = t.neutral ? null : up !== t.lowGood, cls = good == null ? "" : first === last ? "" : good ? "better" : "worse";
+    return `<div class="card trend"><div class="row"><span class="eyebrow">${t.name}</span><b class="${cls}">${t.fmt(last)} ${first === last ? "" : up ? "▲" : "▼"}</b></div>${spark(t.v, cls === "worse" ? "--flag" : cls === "better" ? "--go" : "--fg")}<span class="muted small">from ${t.fmt(first)} 8 weeks ago</span></div>`; };
+  // habits: per game, the last 30 days vs the 30 before
+  const now = G.filter((g) => g.end > to - 30 * DAY), prev = G.filter((g) => g.end <= to - 30 * DAY && g.end > to - 60 * DAY);
+  const rate = (gs, h) => (gs.length ? gs.reduce((a, g) => a + g.moves.filter((m) => m.drop >= BIG && h.test(g, m)).length, 0) / gs.length : null);
+  const NAMES = { check: "A check that loses the checking piece", clock: "Big mistake with under 10% of your clock", taken: "Leaving something to be taken straight away" };
+  const cmp = (a, b, lowGood = true) => (a == null || b == null ? '<td class="muted">not enough games</td>' : Math.abs(a - b) < 0.05 ? '<td class="muted">same</td>' : (b < a) === lowGood ? '<td class="better">▼ better</td>' : '<td class="worse">▲ worse</td>');
+  const habitRows = HABITS.map((h) => { const a = rate(prev, h), b = rate(now, h); return `<tr><td>${NAMES[h.key]}</td><td class="n">${a == null ? "–" : a.toFixed(2)}</td><td class="n">${b == null ? "–" : b.toFixed(2)}</td>${cmp(a, b)}</tr>`; }).join("");
+  const inOp = (gs) => (worst ? gs.filter((g) => g.color === worst.color && openingName(g.eco) === worst.name) : []);
+  const opScore = (gs) => (gs.length ? (100 * gs.reduce((a, g) => a + scoreOf(g.result), 0)) / gs.length : null);
+  const opRow = worst ? `<tr><td>Your worst opening: ${esc(worst.name)} (${worst.color})</td><td class="n">${inOp(prev).length} games · ${opScore(inOp(prev)) == null ? "–" : Math.round(opScore(inOp(prev))) + "%"}</td><td class="n">${inOp(now).length} games · ${opScore(inOp(now)) == null ? "–" : Math.round(opScore(inOp(now))) + "%"}</td>${cmp(opScore(inOp(prev)), opScore(inOp(now)), false)}</tr>` : "";
+  const practiceRows = (n) => runs.slice(0, n).map((r) => `<tr><td>${dShort(r.date)}</td><td>${r.color === "w" ? "White" : "Black"}</td><td class="n">${r.good}</td><td class="n">${r.stops}</td><td>${r.repeats.length ? r.repeats.map(esc).join(", ") : '<span class="muted">none</span>'}</td><td>${esc(r.result)}</td></tr>`).join("");
+  const practiceTable = (n) => runs.length ? `<div class="card"><table class="tbl"><tr><th>Date</th><th>You</th><th class="n">Good moves</th><th class="n">Stopped</th><th>Old mistakes repeated</th><th>Result</th></tr>${practiceRows(n)}</table></div>` : '<div class="card muted">No practice games yet. Play one and it shows up here.</div>';
+
+  $("profile").innerHTML = `
+    <div class="card pcard"><div class="av" aria-hidden="true">${esc(user[0].toUpperCase())}</div><div style="display:grid;gap:10px">
+      <div><b style="font:800 26px var(--display)">${esc(user)}</b> <span class="muted small">${tc} · ${n_(s.n)} games checked</span></div>
+      <div class="facts">
+        <div><span class="eyebrow">Rating</span><b>${s.ratingLast}${change == null ? "" : ` <span class="small ${change >= 0 ? "better" : "worse"}">${change >= 0 ? "▲" : "▼"} ${Math.abs(change)} in 30 days</span>`}</b></div>
+        <div><span class="eyebrow">Strongest phase</span><b>${ph.length ? ph[0][0][0].toUpperCase() + ph[0][0].slice(1) : "–"}</b></div>
+        <div><span class="eyebrow">Weakest phase</span><b>${ph.length ? ph[ph.length - 1][0][0].toUpperCase() + ph[ph.length - 1][0].slice(1) : "–"}</b></div>
+        <div><span class="eyebrow">#1 leak</span><b>${leak}</b></div>
+        <div><span class="eyebrow">Best opening</span><b>${opTxt(best)}</b></div>
+        <div><span class="eyebrow">Worst opening</span><b>${opTxt(worst)}</b></div>
+        <div><span class="eyebrow">Accuracy</span><b>${Math.round(accOf(mine(now.length ? now : G)) || 0)}%</b></div>
+        <div><span class="eyebrow">Practice games</span><b>${runs.length}</b></div>
+      </div></div></div>
+    <h2 class="eyebrow h2">Trends · last 8 weeks</h2><div class="trends">${series.map(trend).join("")}</div>
+    <h2 class="eyebrow h2">Habits · per game, the 30 days before vs the last 30 days</h2>
+    <div class="card"><table class="tbl"><tr><th>Habit</th><th class="n">Before</th><th class="n">Last 30 days</th><th></th></tr>${habitRows}${opRow}</table></div>
+    <h2 class="eyebrow h2">Practice record</h2>${practiceTable(5)}`;
+
+  STATE.practiceHtml = practiceTable(8);
+  // games
+  const recent = [...games].sort((a, b) => b.end - a.end).slice(0, 60);
+  const errs = (g) => { const c = [g.moves.filter((m) => m.drop >= 20).length, g.moves.filter((m) => m.drop >= 10 && m.drop < 20).length, g.moves.filter((m) => m.drop >= 5 && m.drop < 10).length];
+    return [c[0] && `${c[0]} blunder${c[0] > 1 ? "s" : ""}`, c[1] && `${c[1]} mistake${c[1] > 1 ? "s" : ""}`, c[2] && `${c[2]} inacc.`].filter(Boolean).join(" · ") || "clean"; };
+  $("games").innerHTML = `<div class="card"><table class="tbl"><tr><th>Date</th><th>Opponent</th><th>You</th><th>Result</th><th>Your mistakes</th><th></th></tr>${recent.map((g) => { const i = gameInfo(g), sc = scoreOf(g.result);
+    return `<tr><td>${dShort(g.end * 1000)}</td><td>${esc(g.op)} <span class="muted">(${g.opRating})</span></td><td>${g.color === "white" ? "White" : "Black"}</td><td class="${sc === 1 ? "better" : sc === 0 ? "worse" : ""}">${esc(i.res.replace(/^You (\w)/, (_, c) => c.toUpperCase()))}</td><td class="small">${errs(g)}</td><td><button class="btn sm" type="button" data-review="${esc(g.url)}">Review</button></td></tr>`; }).join("")}</table></div>
+    <p class="muted small">Your ${recent.length} most recent ${tc} games. Review opens the move-by-move review with the coach.</p>`;
+
+  // practice
+  $("practicePage").innerHTML = `<div class="card"><b style="font:800 20px var(--display)">Play a practice game</b>
+    <span class="muted">A weak bot replays the lines your opponents used against you. Any inaccuracy or worse, and the coach stops you to fix it.</span>
+    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" type="button" data-practice="w">Play as White</button><button class="btn ghost" type="button" data-practice="b">Play as Black</button></div></div>
+    <h2 class="eyebrow h2">Your practice record</h2>${practiceTable(50)}`;
+
+  // settings
+  $("settings").innerHTML = `<form class="card" id="setForm" style="max-width:520px">
+    <label class="in" for="setUser"><span>chess.com/member/</span><input id="setUser" value="${esc(user)}" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
+    <div class="seg" role="radiogroup" aria-label="Which games">${[["3m", "Last 3 months"], ["500", "Last 500"], ["all", "All time"]].map(([v, t]) => `<label><input type="radio" name="setRange" value="${v}"${STATE.range === v ? " checked" : ""}>${t}</label>`).join("")}</div>
+    <span class="muted small">Time control: ${tc} (the one you play most).</span>
+    <span class="eyebrow">Board colours</span>
+    <div class="seg" role="radiogroup" aria-label="Board colours">${[["green", "Green"], ["brown", "Brown wood"]].map(([v, t]) => `<label><input type="radio" name="setBoard" value="${v}"${(document.documentElement.dataset.board || "green") === v ? " checked" : ""}>${t}</label>`).join("")}</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn" type="submit">Check my games again</button><button class="btn ghost" type="button" id="forget">Use another account</button></div></form>`;
+  $("setForm").onsubmit = (e) => { e.preventDefault(); const u = $("setUser").value.trim(); if (u) run(u, document.querySelector("input[name=setRange]:checked").value); };
+  $("forget").onclick = forget;
+  for (const r of document.querySelectorAll("input[name=setBoard]")) r.onchange = () => setBoard(r.value);
+}
+// board colours: green like chess.com's default, or brown wood; remembered in this browser
+function setBoard(v) { document.documentElement.dataset.board = v; try { localStorage.setItem("cc-board", v); } catch {} }
+try { const b = localStorage.getItem("cc-board"); if (b) document.documentElement.dataset.board = b; } catch {}
+
+// ---------- the move-by-move review of any game from the Games page ----------
+async function openReview(url, btn) {
+  const raw = STATE.raw?.get(url);
+  if (!raw) return;
+  const label = btn.textContent; btn.textContent = "Checking…"; btn.disabled = true;
+  try {
+    const key = `${ANALYSIS_VERSION}:${STATE.user.toLowerCase()}:${url}`;
+    let g = await cacheGet(key);
+    if (!g || !g.evals) { g = await analyseGame(raw, STATE.user, (fen) => STATE.coach.evaluate(fen, 15000)); cachePut(key, g); } // older saves lack per-move evals
+    STATE.game = g;
+    const L = (lesson = await gameLesson(g, STATE.games, (fen, nodes) => STATE.coach.evaluate(fen, nodes)));
+    prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true);
+    coachLines(url.split("/").pop(), g, L);
+  } finally { btn.textContent = label; btn.disabled = false; }
 }
 
 // ---------- report ----------
@@ -272,7 +408,7 @@ function renderReport() {
   if (lessonOf("opening")) plan.push([`Fix one line: ${lessonOf("opening").title.replace(/^Your /, "")}`, "The move you keep playing there, and the better one.", "opening"]);
   if (s.tilt.after2 != null && s.tilt.after2 < (s.tilt.afterWin ?? 100) - 2) plan.push(["Two losses in a row? Take a break", `You score ${Math.round(s.tilt.after2)}% in the next game.`]);
   $("plan").innerHTML = `<div class="step"><span class="ic" aria-hidden="true">♞</span><span class="tx"><b>Play a practice game</b><span class="muted small">A weak bot replays the lines your opponents used against you. Any mistake, and the coach stops you to fix it.</span></span><span class="go"><button class="btn sm" type="button" data-practice>Play</button></span></div>` + plan.map(([t, d2, wt, link], i) => `<div class="step"><span class="ic" aria-hidden="true">${i + 1}</span><span class="tx"><b>${esc(t)}</b><span class="muted small">${esc(d2)}</span></span><span class="go">${wt ? `<button class="btn sm" type="button" data-wt="${wt}">Start lesson</button>` : ""}${link ? `<a class="btn sm ghost" href="${link[1]}" target="_blank" rel="noopener">${link[0]} ↗</a>` : ""}</span></div>`).join("");
-  $("again").onclick = () => { try { localStorage.removeItem(ME); } catch {} history.replaceState(null, "", location.pathname); $("user").value = ""; show("s1"); };
+  $("again").onclick = forget;
 }
 
 // ---------- lessons ----------
@@ -512,14 +648,14 @@ function material() {
 let practice = null, bot = null, nextColor = "w";
 const STOP = ["inacc", "mist", "blun"];
 const pastGames = () => { const seen = new Set(); return [...(STATE.games || []), STATE.game, ...(STATE.history || [])].filter((g) => g && !g.start && !seen.has(g.url) && seen.add(g.url)); };
-function startPracticeGame() {
-  const color = nextColor; nextColor = color === "w" ? "b" : "w";
+function startPracticeGame(pick) {
+  const color = pick || nextColor; nextColor = color === "w" ? "b" : "w";
   lesson = { key: "practice", title: "Practice game", flip: color === "b", steps: [{ start: new Chess().fen(), moves: "",
     name: `Practice game: you're ${color === "w" ? "White" : "Black"}`,
     body: "The bot plays the lines your opponents used against you. Make a mistake, even a small one, and the coach stops you to fix it." }] };
   prep(lesson); wtEl.hidden = false; wtShow(0, false);
   $("wtNext").textContent = "Done ✓"; $("wtPlay").hidden = true;
-  practice = { color, sans: [], good: 0, stops: 0, fen: new Chess().fen(), seen: null };
+  practice = { color, sans: [], good: 0, stops: 0, fen: new Chess().fen(), seen: null, repeats: [], start: Date.now() };
   bot ||= new Engine(2);
   indexPast(practice);
   if (color === "b") botMove(token);
@@ -569,7 +705,9 @@ async function practiceTurn(m, before, j, my) {
     cur = cur.parent; renderMoves();
     wb.set(before, lesson.flip); wb.mark([m.from, m.to], "bad"); material(); wb.setBusy(false);
     practice.stops++; practice.fen = before;
-    const e = practice.seen?.get(posKey(before)), times = e ? ` This position came up in ${e.n} of your games${e.m[m.san] ? `, and you played <b>${esc(m.san)}</b> in ${e.m[m.san]} of them` : ""}.` : "";
+    const e = practice.seen?.get(posKey(before));
+    if (e?.m[m.san] && !practice.repeats.includes(m.san)) practice.repeats.push(m.san);
+    const times = e ? ` This position came up in ${e.n} of your games${e.m[m.san] ? `, and you played <b>${esc(m.san)}</b> in ${e.m[m.san]} of them` : ""}.` : "";
     tryMsg(`<span class="bdg ${j.cls} inl">${j.sym}</span> <b>${esc(m.san)}</b> is ${j.word}.${times} The coach explains; then try again.`, true);
     // Claude explains Stockfish's own refutation instead of hunting for one: faster, and never "I'm not sure why"
     const ac = new Chess(before); ac.move(m.san);
@@ -589,9 +727,23 @@ async function practiceTurn(m, before, j, my) {
   if (my === token && practice) botMove(my);
 }
 function practiceOver() {
-  const g = wb.game();
-  tryMsg(`${g.isCheckmate() ? (g.turn() === practice.color ? "You got checkmated." : "Checkmate, you won!") : "Draw."} ${practice.good} good moves, stopped ${practice.stops} time${practice.stops === 1 ? "" : "s"}.`, true);
-  practice = null;
+  const g = wb.game(), res = g.isCheckmate() ? (g.turn() === practice.color ? "Lost" : "Won") : "Draw";
+  tryMsg(`${res === "Lost" ? "You got checkmated." : res === "Won" ? "Checkmate, you won!" : "Draw."} ${practice.good} good moves, stopped ${practice.stops} time${practice.stops === 1 ? "" : "s"}.`, true);
+  savePractice(res);
+}
+// every practice game is kept in this browser for the practice record and the profile
+function savePractice(result) {
+  const p = practice; practice = null;
+  if (!p || p.sans.length < 4) return;
+  cachePut(`practice:${STATE.user.toLowerCase()}:${p.start}`, { date: p.start, color: p.color, good: p.good, stops: p.stops, repeats: p.repeats, result, moves: p.sans.length });
+  if (STATE.games) setTimeout(renderApp, 300);
+}
+const leavePractice = () => { if (practice) savePractice("Stopped"); };
+
+function summaryHtml(m) {
+  const rows = CLS.map(([, cls, sym, word]) => `<tr><td class="n">${m.tally.op[cls] || 0}</td><td><span class="lbl"><span class="bdg ${cls} inl">${sym}</span>${word.replace(/^(an?|the) /, "")}</span></td><td class="n">${m.tally.me[cls] || 0}</td></tr>`).join("");
+  return `<table class="tbl sum"><tr><th class="n">${esc(m.op)}</th><th></th><th class="n">${esc(m.me)}</th></tr>
+    <tr><td class="n"><b>${m.accOp.toFixed(1)}</b></td><td style="text-align:center" class="eyebrow">Accuracy</td><td class="n"><b>${m.accMe.toFixed(1)}</b></td></tr>${rows}</table>`;
 }
 
 function navUi() {
@@ -612,7 +764,7 @@ async function wtShow(i, animate) {
   practice = null;
   $("wtPlay").hidden = lesson.key !== "game" || wi !== lesson.steps.length - 1;
   $("wtBody").innerHTML = sqLinks(s.body);
-  $("wtExtra").innerHTML = (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
+  $("wtExtra").innerHTML = (s.summary ? summaryHtml(s.summary) : "") + (s.html || "") + (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
     (s.link ? `<a class="btn ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">See your game ↗</a>` : "") +
     (s.rule ? `<div class="rule"><b>Remember:</b> ${sqLinks(s.rule)}</div>` : "");
   navUi();
@@ -779,7 +931,7 @@ async function askClaude(q) {
 }
 
 document.addEventListener("click", (ev) => {
-  if (ev.target.closest("[data-practice]")) startPracticeGame();
+  if (ev.target.closest("[data-practice]:not([data-practice^=w]):not([data-practice^=b])")) startPracticeGame();
   const b = ev.target.closest("[data-wt]");
   if (b) { lesson = STATE.lessons.find((l) => l.key === b.dataset.wt); if (lesson) { prep(lesson); wtEl.hidden = false; $("askOut").textContent = ""; wtShow(0, true); $("wtNext").focus(); } }
   const mv = ev.target.closest("#mvList button");
@@ -793,12 +945,14 @@ document.addEventListener("click", (ev) => {
     else playLine(ref).then((ok) => ok || showSan(t)).then((ok) => ok || wb.ping(ref.dataset.sq));
   }
   const chip = ev.target.closest("#askChips button"); if (chip) askClaude(chip.textContent);
-  if (ev.target === wtEl) wtEl.hidden = true;
+  if (ev.target === wtEl) { leavePractice(); wtEl.hidden = true; }
+  const pr = ev.target.closest("[data-practice]"); if (pr && pr.dataset.practice) startPracticeGame(pr.dataset.practice);
+  const rv = ev.target.closest("[data-review]"); if (rv) openReview(rv.dataset.review, rv);
 });
 $("askForm").addEventListener("submit", (ev) => { ev.preventDefault(); const q = $("askIn").value.trim(); if (q) askClaude(q); });
-$("wtClose").addEventListener("click", () => (wtEl.hidden = true));
+$("wtClose").addEventListener("click", () => { leavePractice(); wtEl.hidden = true; });
 $("wtPrev").addEventListener("click", () => wtShow(wi - 1, false));
-$("wtNext").addEventListener("click", () => (wi === lesson.steps.length - 1 ? (wtEl.hidden = true) : wtShow(wi + 1, true)));
+$("wtNext").addEventListener("click", () => { if (wi === lesson.steps.length - 1) { leavePractice(); wtEl.hidden = true; } else wtShow(wi + 1, true); });
 $("wtReplay").addEventListener("click", () => wtShow(wi, true));
 $("mvPrev").addEventListener("click", () => nav(cur.parent));
 $("mvNext").addEventListener("click", () => nav(cur.kids[0]));
@@ -834,4 +988,8 @@ const qs = new URLSearchParams(location.search);
 const me = !qs.get("u") && !qs.get("game") && remembered();
 if (me && me.u) { $("user").value = me.u; if (["3m", "500", "all"].includes(me.r)) document.querySelector(`input[name=range][value="${me.r}"]`).checked = true; run(me.u, me.r || "3m"); }
 if (qs.get("u") && !qs.get("game")) { $("user").value = qs.get("u"); const r = qs.get("r"); if (["3m", "500", "all"].includes(r)) document.querySelector(`input[name=range][value="${r}"]`).checked = true; run(qs.get("u"), r || "3m"); }
-if (qs.get("game") && qs.get("u")) review(qs.get("u"), qs.get("game"));
+if (qs.get("game") && qs.get("u")) {
+  const saved = remembered();
+  if (saved?.u && saved.u.toLowerCase() === qs.get("u").toLowerCase()) { pendingGame = qs.get("game"); run(saved.u, saved.r || "3m"); }
+  else review(qs.get("u"), qs.get("game"));
+}

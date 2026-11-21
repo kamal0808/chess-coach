@@ -76,8 +76,11 @@ async function run(user, range) {
   const skipped = all.length - games.length;
   $("anTitle").textContent = `Checking ${n_(games.length)} ${tc} games…`;
 
+  // all saved analyses in two reads, not one read per game
+  const saved = new Map();
+  for (const v of [1, ANALYSIS_VERSION]) for (const a of await cacheAll(`${v}:${user.toLowerCase()}:`)) saved.set(a.url, a);
   const done = [], todo = [];
-  for (const g of games) { const c = await cacheGetAny(user, g.url); c ? done.push(c) : todo.push(g); }
+  for (const g of games) { const c = saved.get(g.url); c ? done.push(c) : todo.push(g); }
   const engines = Array.from({ length: Math.min(poolSize(), Math.max(1, todo.length)) }, () => new Engine());
   const t0 = performance.now(); let next = 0, shown = 0;
   const tick = () => {
@@ -99,10 +102,16 @@ async function run(user, range) {
     }
   }));
   engines.forEach((e) => e.stop());
-  $("anTitle").textContent = "Writing your lessons…";
   const stats = buildStats(done);
   const coach = new Engine();
-  const lessons = await buildLessons(stats, done.filter((g) => g.moves.length >= 5), (fen, nodes) => coach.evaluate(fen, nodes));
+  // lessons take deep engine checks: reuse the last ones until a new game comes in
+  const lkey = `lessons:${user.toLowerCase()}:${range}:${tc}`, sig = `${done.length}:${Math.max(...done.map((g) => g.end))}`, last = await cacheGet(lkey);
+  let lessons = last && last.sig === sig ? last.lessons : null;
+  if (!lessons) {
+    $("anTitle").textContent = "Writing your lessons…";
+    lessons = await buildLessons(stats, done.filter((g) => g.moves.length >= 5), (fen, nodes) => coach.evaluate(fen, nodes));
+    cachePut(lkey, { sig, lessons });
+  }
   STATE = { user, range, tc, skipped, stats, lessons, games: done, coach };
   renderReport();
   show("s3");

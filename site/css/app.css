@@ -303,3 +303,14 @@ html, body { margin: 0; }
   .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); } .trends { grid-template-columns: 1fr; }
   .tbl { font-size: 13px; }
 }
+/* in the app the board opens in the page beside the sidebar, chess.com-style, not as a popup */
+.app:has(.sb:not([hidden])) { grid-template-columns: 240px minmax(0, 1fr); }
+.sb a.nav { font-size: 17px; padding: 12px 14px; } .sb .ic { font-size: 22px; width: 26px; }
+.app:has(.sb:not([hidden])) .wt { inset: 0 0 0 240px; background: var(--bg); place-items: start stretch; z-index: 12; }
+.app:has(.sb:not([hidden])) .wt .panel { width: auto; max-width: none; border: 0; border-radius: 0; background: transparent; padding: 18px 24px; justify-content: start;
+  grid-template-columns: minmax(0, min(calc(100vh - 150px), 820px)) minmax(340px, 460px); }
+@media (max-width: 720px) {
+  .app:has(.sb:not([hidden])) .wt { inset: 0 0 64px 0; }
+  .app:has(.sb:not([hidden])) .wt .panel { grid-template-columns: 1fr; padding: 12px; }
+  .app:has(.sb:not([hidden])) .wt .wtb { max-width: none; }
+}

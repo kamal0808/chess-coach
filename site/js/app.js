@@ -136,8 +136,17 @@ const PAGES = { home: "sP", games: "sG", practice: "sX", lessons: "s3", settings
 function route() {
   if (!STATE?.games) return;
   const p = PAGES[location.hash.slice(1)] ? location.hash.slice(1) : "home";
+  if (!wtEl.hidden) { leavePractice(); wtEl.hidden = true; } // switching pages closes the board
   show(PAGES[p]);
   for (const a of document.querySelectorAll(".sb a.nav")) a.classList.toggle("on", a.dataset.p === p);
+  if (p === "practice") openPracticeBoard();
+}
+// Practice opens on the board straight away, like chess.com's Play page: colours and your record in the right panel
+function openPracticeBoard() {
+  lesson = { key: "practice-idle", title: "Practice", flip: false, steps: [{ start: new Chess().fen(), moves: "", name: "Practice vs the bot",
+    body: "Pick a colour. The bot replays the lines your opponents used against you; any inaccuracy or worse, and the coach stops you to fix it.",
+    html: `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px"><button class="btn" type="button" data-practice="w">Play as White</button><button class="btn ghost" type="button" data-practice="b">Play as Black</button></div><span class="eyebrow" style="margin-top:12px;display:block">Your practice record</span>${STATE.practiceHtml || ""}` }] };
+  prep(lesson); wtEl.hidden = false; wtShow(0, false); $("wtNext").textContent = "Close";
 }
 addEventListener("hashchange", route);
 function forget() {
@@ -204,6 +213,7 @@ async function renderApp() {
     <div class="card"><table class="tbl"><tr><th>Habit</th><th class="n">Before</th><th class="n">Last 30 days</th><th></th></tr>${habitRows}${opRow}</table></div>
     <h2 class="eyebrow h2">Practice record</h2>${practiceTable(5)}`;
 
+  STATE.practiceHtml = practiceTable(8);
   // games
   const recent = [...games].sort((a, b) => b.end - a.end).slice(0, 60);
   const errs = (g) => { const c = [g.moves.filter((m) => m.drop >= 20).length, g.moves.filter((m) => m.drop >= 10 && m.drop < 20).length, g.moves.filter((m) => m.drop >= 5 && m.drop < 10).length];
@@ -738,7 +748,7 @@ async function wtShow(i, animate) {
   practice = null;
   $("wtPlay").hidden = lesson.key !== "game" || wi !== lesson.steps.length - 1;
   $("wtBody").innerHTML = sqLinks(s.body);
-  $("wtExtra").innerHTML = (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
+  $("wtExtra").innerHTML = (s.html || "") + (s.stat ? `<span class="stat">${esc(s.stat)}</span> ` : "") +
     (s.link ? `<a class="btn ghost sm" href="${esc(s.link)}" target="_blank" rel="noopener">See your game ↗</a>` : "") +
     (s.rule ? `<div class="rule"><b>Remember:</b> ${sqLinks(s.rule)}</div>` : "");
   navUi();

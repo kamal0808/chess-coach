@@ -119,7 +119,11 @@ async function run(user, range) {
   await renderApp();
   $("sb").hidden = false;
   route();
+  // a link to one game (from the extension) opens its review inside the app once the app is ready
+  const want = pendingGame && [...STATE.raw.keys()].find((u) => u.endsWith("/" + pendingGame));
+  if (pendingGame) { pendingGame = null; if (want) openReview(want, { textContent: "", disabled: false }); }
 }
+let pendingGame = null;
 const n_ = (n) => n.toLocaleString("en-IN");
 
 function spotted(s) {
@@ -737,7 +741,7 @@ function savePractice(result) {
 const leavePractice = () => { if (practice) savePractice("Stopped"); };
 
 function summaryHtml(m) {
-  const rows = CLS.map(([, cls, sym, word]) => `<tr><td class="n">${m.tally.op[cls] || 0}</td><td style="text-align:center"><span class="bdg ${cls} inl">${sym}</span> ${word.replace(/^(an?|the) /, "")}</td><td class="n">${m.tally.me[cls] || 0}</td></tr>`).join("");
+  const rows = CLS.map(([, cls, sym, word]) => `<tr><td class="n">${m.tally.op[cls] || 0}</td><td><span class="lbl"><span class="bdg ${cls} inl">${sym}</span>${word.replace(/^(an?|the) /, "")}</span></td><td class="n">${m.tally.me[cls] || 0}</td></tr>`).join("");
   return `<table class="tbl sum"><tr><th class="n">${esc(m.op)}</th><th></th><th class="n">${esc(m.me)}</th></tr>
     <tr><td class="n"><b>${m.accOp.toFixed(1)}</b></td><td style="text-align:center" class="eyebrow">Accuracy</td><td class="n"><b>${m.accMe.toFixed(1)}</b></td></tr>${rows}</table>`;
 }
@@ -984,4 +988,8 @@ const qs = new URLSearchParams(location.search);
 const me = !qs.get("u") && !qs.get("game") && remembered();
 if (me && me.u) { $("user").value = me.u; if (["3m", "500", "all"].includes(me.r)) document.querySelector(`input[name=range][value="${me.r}"]`).checked = true; run(me.u, me.r || "3m"); }
 if (qs.get("u") && !qs.get("game")) { $("user").value = qs.get("u"); const r = qs.get("r"); if (["3m", "500", "all"].includes(r)) document.querySelector(`input[name=range][value="${r}"]`).checked = true; run(qs.get("u"), r || "3m"); }
-if (qs.get("game") && qs.get("u")) review(qs.get("u"), qs.get("game"));
+if (qs.get("game") && qs.get("u")) {
+  const saved = remembered();
+  if (saved?.u && saved.u.toLowerCase() === qs.get("u").toLowerCase()) { pendingGame = qs.get("game"); run(saved.u, saved.r || "3m"); }
+  else review(qs.get("u"), qs.get("game"));
+}

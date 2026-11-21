@@ -317,3 +317,5 @@ html, body { margin: 0; }
 /* brown wood board, for players used to it */
 :root[data-board="brown"] { --sq-l: #f0d9b5; --sq-d: #b58863; }
 .wt .bubble .tbl.sum td, .wt .bubble .tbl.sum th { border-top: 1px solid #eee; padding: 4px 8px; color: #222; }
+.wt .tbl.sum .lbl { display: flex; align-items: center; justify-content: center; gap: 8px; }
+.wt .tbl.sum .lbl .bdg.inl { vertical-align: middle; }

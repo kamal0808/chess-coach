@@ -750,25 +750,13 @@ async function askClaude(q) {
   const g = wb.game(), fen = g.fen(), wtm = g.turn() === "w", s = lesson.steps[wi];
   const here = await coachEval(fen, 250000);
   const gi = s.game;
-  if (gi && gi.san && mainLen) return askHere(q, s, gi, fen, `${evalTxt(here.cp, wtm)}, best line ${pvSan(fen, here.pv)}`);
-  const prompt = `You're my chess coach. Answer in plain words, at most 150 words. Use square names (e4) and normal move notation.
-
-About me: chess.com player ${STATE.user}, about ${gi ? gi.myR : STATE.stats.ratingLast} rated in ${STATE.tc}.${gi ? ` In this game I was ${gi.me} against ${gi.op} (${gi.opR}), ${gi.res.replace(/^You /, "I ").toLowerCase()}.` : ""}${STATE.game ? `
-The whole game: ${STATE.game.san.map((m, i) => (i % 2 ? m : `${i / 2 + 1}. ${m}`)).join(" ")}` : ""}
-
-The board right now (FEN): ${fen}
-${wtm ? "White" : "Black"} to move.
-Lesson: "${lesson.title}", step "${s.name}": ${s.body}
-${explored.length ? `Moves I tried on the board from the lesson position: ${explored.join(" ")}\n` : ""}Stockfish 19 here: ${evalTxt(here.cp, wtm)}, best line: ${pvSan(fen, here.pv)}
-
-Trust the engine's evaluation over your own calculation. If you're not sure about a line, say so.
-
-My question: ${q}`;
-  let copied = false;
-  try { await navigator.clipboard.writeText(prompt); copied = true; } catch {}
-  const url = "https://claude.ai/new?q=" + encodeURIComponent(prompt);
-  window.open(url, "_blank", "noopener");
-  out.innerHTML = `Opened Claude in a new tab with your question.${copied ? " It's also copied: if the box is empty there, paste it." : ""} <a href="${url}" target="_blank" rel="noopener">Open again ↗</a>`;
+  const engine = `${evalTxt(here.cp, wtm)}, best line ${pvSan(fen, here.pv)}`;
+  if (gi && gi.san && mainLen) return askHere(q, s, gi, fen, engine);
+  // practice games and lessons without one game: answered in the card too, from the board itself
+  const moves = practice ? practice.sans : [], meW = practice ? practice.color === "w" : gi?.me !== "black";
+  return streamCoach({ moves, ply: Math.max(0, moves.length - 1), fen, question: q.slice(0, 400),
+    verdict: `${s.name}. ${s.body} | Stockfish on the board now: ${engine}`.slice(0, 500),
+    white: meW ? STATE.user : practice ? "Practice bot" : gi?.op || "", black: meW ? (practice ? "Practice bot" : gi?.op || "") : STATE.user });
 }
 
 document.addEventListener("click", (ev) => {

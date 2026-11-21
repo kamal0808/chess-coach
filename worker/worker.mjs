@@ -79,17 +79,21 @@ async function handle(req, env, ctx, origin) {
     let b;
     try { b = await req.json(); } catch { return json({ error: 'bad json' }, 400); }
     const { moves, ply = 0, verdict = '', white = '', black = '', result = '', question = '', fen = '' } = b || {};
-    if (!Array.isArray(moves) || moves.length > 600 || !moves.every((m) => str(m, 10)) || !Number.isInteger(ply) || ply < 0 || ply >= moves.length
+    if (!Array.isArray(moves) || moves.length > 600 || !moves.every((m) => str(m, 10)) || !Number.isInteger(ply) || ply < 0 || (moves.length ? ply >= moves.length : !fen)
       || !str(verdict, 500) || !str(white, 40) || !str(black, 40) || !str(result, 10) || !str(question, 400) || !str(fen, 100)) return json({ error: 'bad request' }, 400);
     if (fen) try { new Chess(fen); } catch { return json({ error: 'bad position' }, 400); }
     if (path === '/game') return wholeGame(b, env, ctx);
 
     const c = new Chess();
     let before;
-    try { for (let i = 0; i <= ply; i++) { if (i === ply) before = c.fen(); c.move(moves[i]); } } catch { return json({ error: 'illegal move list' }, 400); }
+    // a board without a game behind it (a lesson position, a fresh practice game) comes as just a FEN
+    if (moves.length) try { for (let i = 0; i <= ply; i++) { if (i === ply) before = c.fen(); c.move(moves[i]); } } catch { return json({ error: 'illegal move list' }, 400); }
     const numbered = moves.map((m, i) => (i % 2 ? m : `${i / 2 + 1}. ${m}`)).join(' ');
     const mover = ply % 2 ? 'Black' : 'White', no = `${Math.floor(ply / 2) + 1}${ply % 2 ? '...' : '.'}`;
-    const user = `Game: ${white} (White) vs ${black} (Black), result ${result}.
+    const user = !moves.length ? `${white} (White) vs ${black} (Black).
+The board the player is looking at (FEN): ${fen}
+The review says: "${verdict}"
+${question ? `The player asks: ${question}\nAnswer that question about this position.` : 'Explain this position.'}` : `Game: ${white} (White) vs ${black} (Black), result ${result}.
 Moves: ${numbered}
 
 The move: ${no}${moves[ply]} by ${mover}.
